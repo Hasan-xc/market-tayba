@@ -1943,6 +1943,34 @@ class CloudBackedDatabase {
     this.notify();
   }
 
+  mergeCloudStockAuditLogs(cloudLogs: StockAuditLog[]) {
+    const cloudMap = new Map(cloudLogs.map((l) => [l.id, l]));
+    const localById = new Map(this.inMemoryStockAuditLogs.map((l) => [l.id, l]));
+    const merged: StockAuditLog[] = [];
+
+    for (const cl of cloudLogs) {
+      const local = localById.get(cl.id);
+      if (local && !local.id) {
+        merged.push(local);
+      } else {
+        merged.push({
+          ...cl,
+          reason: cl.reason || local?.reason,
+          performedBy: cl.performedBy || local?.performedBy || 'النظام',
+        });
+      }
+    }
+    for (const ll of this.inMemoryStockAuditLogs) {
+      if (!cloudMap.has(ll.id)) merged.push(ll);
+    }
+
+    merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    if (merged.length > 2000) merged.length = 2000;
+    this.inMemoryStockAuditLogs = merged;
+    this.persist(STORAGE_KEYS.STOCK_AUDIT, this.inMemoryStockAuditLogs);
+    this.notify();
+  }
+
   setReturns(returns: ReturnRecord[]) {
     this.inMemoryReturns = returns;
     this.persist(STORAGE_KEYS.RETURNS, this.inMemoryReturns);

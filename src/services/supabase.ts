@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
-import { Product, SaleTransaction, ReturnRecord, StoreSettings, Customer, DebtTransaction } from '../types';
+import { Product, SaleTransaction, ReturnRecord, StoreSettings, Customer, DebtTransaction, StockAuditLog } from '../types';
 import { dbService, SEED_PRODUCTS, DEFAULT_SETTINGS } from './db';
 
 export const DEFAULT_SUPABASE_URL = 'https://qvfunbtrgdhtqlmjwdzc.supabase.co';
@@ -1387,6 +1387,7 @@ export class SupabaseService {
     returnsCount: number;
     customersCount: number;
     debtCount: number;
+    auditCount: number;
     message: string;
   }> {
     const client = this.getClient();
@@ -1398,6 +1399,7 @@ export class SupabaseService {
         returnsCount: 0,
         customersCount: 0,
         debtCount: 0,
+        auditCount: 0,
         message: 'Supabase غير مهيأ',
       };
     }
@@ -1662,6 +1664,31 @@ export class SupabaseService {
         // جدول store_settings اختياري
       }
 
+      // 7. جلب سجل حركات وتدقيق المخزون stock_audit_logs
+      let auditCount = 0;
+      try {
+        const { data: cloudAudit, error: aErr } = await client.from('stock_audit_logs').select('*').order('created_at', { ascending: false });
+        if (!aErr && cloudAudit && cloudAudit.length > 0) {
+          const mappedAudit: StockAuditLog[] = cloudAudit.map((ca: any) => ({
+            id: String(ca.id),
+            productId: String(ca.product_id || ''),
+            barcode: String(ca.barcode || ''),
+            productName: String(ca.product_name || 'صنف'),
+            type: (ca.type as StockAuditLog['type']) || 'manual_adjustment',
+            quantityDelta: Number(ca.quantity_delta) || 0,
+            previousQuantity: Number(ca.previous_quantity) || 0,
+            newQuantity: Number(ca.new_quantity) || 0,
+            reason: ca.reason || undefined,
+            performedBy: ca.performed_by || 'النظام',
+            createdAt: ca.created_at || new Date().toISOString(),
+          }));
+          dbService.mergeCloudStockAuditLogs(mappedAudit);
+          auditCount = mappedAudit.length;
+        }
+      } catch (err) {
+        console.warn('Error fetching stock audit logs from cloud:', err);
+      }
+
       return {
         success: true,
         productsCount,
@@ -1669,6 +1696,7 @@ export class SupabaseService {
         returnsCount,
         customersCount,
         debtCount,
+        auditCount,
         message: `تم جلب البيانات السحابية بنجاح! (${productsCount} منتج، ${salesCount} مبيعات، ${customersCount} عميل)`,
       };
     } catch (e: any) {
@@ -1679,6 +1707,7 @@ export class SupabaseService {
         returnsCount: 0,
         customersCount: 0,
         debtCount: 0,
+        auditCount: 0,
         message: `خطأ في جلب البيانات: ${e?.message || e}`,
       };
     }

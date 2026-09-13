@@ -146,9 +146,6 @@ export const LoginModal = ({ isOpen, onClose, onLoginSuccess, showCloseBtn = fal
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
                 كلمة المرور (Password)
               </label>
-              <span className="text-[11px] text-slate-400 font-mono">
-                الافتراضية: 12345
-              </span>
             </div>
             <div className="relative">
               <div className="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none text-slate-400">

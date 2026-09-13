@@ -58,7 +58,7 @@ export const DEFAULT_USERS: UserAccount[] = [
     role: 'cashier',
     branchId: 'branch-main',
     branchName: 'الفرع الرئيسي',
-    mustChangePassword: false,
+    mustChangePassword: true,
     createdAt: '2026-01-01T00:00:00.000Z',
   },
   {
@@ -69,10 +69,13 @@ export const DEFAULT_USERS: UserAccount[] = [
     role: 'cashier',
     branchId: 'branch-sharshi',
     branchName: 'فرع الشارشي',
-    mustChangePassword: false,
+    mustChangePassword: true,
     createdAt: '2026-01-01T00:00:00.000Z',
   },
 ];
+
+// الحد الأدنى لكلمة المرور (موحد مع حد GoTrue السحابي 6 على اللوحة)
+export const MIN_PASSWORD_LENGTH = 6;
 
 export const DEFAULT_SETTINGS: StoreSettings = {
   storeName: 'ماركت طيبه',
@@ -173,6 +176,7 @@ class CloudBackedDatabase {
   private async runMigrations(): Promise<void> {
     await this.migrateSecurityPinHash();
     await this.migrateUserPasswordHashes();
+    await this.migrateForcePasswordChangeForDefaultPassword();
   }
 
   /** وعد جهوزية القاعدة: يكتمل بعد انتهاء جميع ترحيلات التحميل */
@@ -231,14 +235,9 @@ class CloudBackedDatabase {
       const storedAuth = localStorage.getItem(STORAGE_KEYS.AUTH_USER);
       if (storedAuth) {
         this.currentAuthUser = JSON.parse(storedAuth);
-      } else {
-        // افتراضياً أول مرة: تسجيل الدخول باسم ahmed
-        const defaultAdmin = this.inMemoryUsers.find((u) => u.username === 'ahmed') || this.inMemoryUsers[0];
-        if (defaultAdmin) {
-          this.currentAuthUser = defaultAdmin;
-          this.persist(STORAGE_KEYS.AUTH_USER, defaultAdmin);
-        }
       }
+      // بلا تسجيل دخول تلقائي: أول فتحة تُفتح صفحة تسجيل الدخول، والجلسة تستمر
+      // (تُحفظ أعلاه) حتى يسجّل المستخدم خروجه بنفسه.
 
       const storedProducts = localStorage.getItem(STORAGE_KEYS.PRODUCTS);
       if (storedProducts) {
@@ -358,6 +357,38 @@ class CloudBackedDatabase {
       }
     } catch (e) {
       console.warn('Failed to migrate user passwords to hash:', e);
+    }
+  }
+
+  // ==== إلزام تغيير كلمة المرور لمن لا يزال يستخدم الافتراضية (بلا قفل أي حساب) ====
+  // أي جهاز مخزّن فيه كلمة المرور الافتراضية 12345 (نصاً أو هاشاً) يُرفع له علم
+  // mustChangePassword دون تغيير كلمة المرور نفسها، فيُجبر على تعيين كلمة خاصة
+  // به عند أول تسجيل دخول بعد التحديث — ثم تحل المحل وكلمة 12345 تهلك من الجهاز.
+  private async migrateForcePasswordChangeForDefaultPassword(): Promise<void> {
+    try {
+      const defaultHash = await hashPassword('12345');
+      let changed = false;
+      this.inMemoryUsers = this.inMemoryUsers.map((u) => {
+        if ((u.password === '12345' || u.password === defaultHash) && !u.mustChangePassword) {
+          changed = true;
+          return { ...u, mustChangePassword: true };
+        }
+        return u;
+      });
+      if (!changed) return;
+      const updatedCurrent = this.currentAuthUser
+        ? this.inMemoryUsers.find((u) => u.id === this.currentAuthUser!.id)
+        : undefined;
+      if (updatedCurrent) this.currentAuthUser = updatedCurrent;
+      this.inMemorySettings.users = this.inMemoryUsers;
+      this.persist(STORAGE_KEYS.USERS, this.inMemoryUsers);
+      this.persist(STORAGE_KEYS.SETTINGS, this.inMemorySettings);
+      if (this.currentAuthUser) {
+        this.persist(STORAGE_KEYS.AUTH_USER, this.currentAuthUser);
+      }
+      this.notify();
+    } catch (e) {
+      console.warn('Failed to force password change for default password:', e);
     }
   }
 
@@ -2302,11 +2333,24 @@ class CloudBackedDatabase {
     this.notify();
   }
 
-  changePassword(userId: string, newPassword: string): { success: boolean; message: string } {
-    const cleanPass = (newPassword || '').trim();
-    if (!cleanPass || cleanPass.length < 4) {
-      return { success: false, message: 'يجب أن تتكون كلمة المرور من 4 خانات على الأقل' };
+  /** تحقق موحد من صلاحية كلمة مرور جديدة (≥6 خانات وليست الافتراضية 12345) */
+  isValidNewPassword(password: string): { ok: boolean; message?: string } {
+    const clean = (password || '').trim();
+    if (!clean || clean.length < MIN_PASSWORD_LENGTH) {
+      return { ok: false, message: `كلمة المرور يجب أن تتكون من ${MIN_PASSWORD_LENGTH} خانات على الأقل` };
     }
+    if (clean === '12345') {
+      return { ok: false, message: 'لا يمكن استخدام كلمة المرور الافتراضية (12345) ككلمة سر جديدة' };
+    }
+    return { ok: true };
+  }
+
+  changePassword(userId: string, newPassword: string): { success: boolean; message: string } {
+    const check = this.isValidNewPassword(newPassword);
+    if (!check.ok) {
+      return { success: false, message: check.message! };
+    }
+    const cleanPass = (newPassword || '').trim();
 
     const idx = this.inMemoryUsers.findIndex((u) => u.id === userId);
     if (idx === -1) {
@@ -2334,6 +2378,11 @@ class CloudBackedDatabase {
     return { success: true, message: 'تم تغيير كلمة المرور بنجاح' };
   }
 
+  /** كلمة مرور مؤقتة عشوائية للصفوف المنشأة بدون كلمة مرور (لا افتراضي معروف) */
+  private randomTempPassword(): string {
+    return 'tp-' + Date.now().toString(36) + '-' + Math.random().toString(36).substring(2, 10);
+  }
+
   saveUser(user: Partial<UserAccount> & { username: string; name: string }): UserAccount {
     const now = new Date().toISOString();
     const cleanUsername = user.username.trim().toLowerCase();
@@ -2356,7 +2405,7 @@ class CloudBackedDatabase {
           id: user.id,
           username: cleanUsername,
           name: cleanName,
-          password: user.password ? user.password.trim() : '12345',
+          password: user.password ? user.password.trim() : this.randomTempPassword(),
           role: user.role || 'cashier',
           branchId: user.branchId || 'branch-main',
           branchName: user.branchName,
@@ -2370,7 +2419,7 @@ class CloudBackedDatabase {
         id: 'usr-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
         username: cleanUsername,
         name: cleanName,
-        password: user.password ? user.password.trim() : '12345',
+        password: user.password ? user.password.trim() : this.randomTempPassword(),
         role: user.role || 'cashier',
         branchId: user.branchId || 'branch-main',
         branchName: user.branchName,

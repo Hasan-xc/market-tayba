@@ -277,7 +277,7 @@ export default function App() {
         onOpenUsers={() => setIsUsersModalOpen(true)}
       />
 
-      {/* شريط تنبيه الأمان بتغيير كلمة المرور الافتراضية 12345 */}
+      {/* شريط تنبيه الأمان: إلزام تغيير كلمة المرور الافتراضية المؤقتة عند أول دخول */}
       {currentUser && currentUser.mustChangePassword && !isPasswordAlertDismissed && (
         <PasswordAlertBanner
           user={currentUser}
@@ -420,7 +420,7 @@ export default function App() {
         showToast={showToast}
       />
 
-      {/* مودال تسجيل الدخول للنظام بالحساب واسم المستخدم ahmed وكلمة المرور 12345 */}
+      {/* مودال تسجيل الدخول — يُفتح عند أول دخول أو عند انقطاع الجلسة (لا دخول تلقائي) */}
       <LoginModal
         isOpen={isLoginModalOpen || !currentUser}
         onClose={() => {

@@ -33,8 +33,8 @@ export const PasswordChangeModal = ({ isOpen, onClose, user, onSuccess }: Props)
       return;
     }
 
-    if (!newPassword.trim() || newPassword.length < 4) {
-      setErrorMsg('كلمة المرور الجديدة يجب أن تكون 4 خانات على الأقل');
+    if (!newPassword.trim() || newPassword.length < 6) {
+      setErrorMsg('كلمة المرور الجديدة يجب أن تكون 6 خانات على الأقل');
       return;
     }
 
@@ -86,7 +86,7 @@ export const PasswordChangeModal = ({ isOpen, onClose, user, onSuccess }: Props)
           <div className="mt-4 p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 flex items-start gap-2.5 text-xs text-amber-800 dark:text-amber-300">
             <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
             <div className="leading-relaxed">
-              <span className="font-bold">تنبيه أمان واجب:</span> أنت تستخدم كلمة المرور الافتراضية (<code className="font-mono bg-amber-200/60 dark:bg-amber-900/60 px-1 py-0.5 rounded text-amber-950 dark:text-amber-200">12345</code>). يُرجى تعيين كلمة مرور قوية وخاصة بك لحماية بيانات المبيعات والمخزن.
+              <span className="font-bold">تنبيه أمان واجب:</span> أنت لا تزال تستخدم كلمة المرور الافتراضية المؤقتة لحسابك. يُرجى تعيين كلمة مرور قوية وخاصة بك (6 خانات فأكثر) لحماية بيانات المبيعات والمخزن.
             </div>
           </div>
         )}
@@ -108,7 +108,7 @@ export const PasswordChangeModal = ({ isOpen, onClose, user, onSuccess }: Props)
 
           <div>
             <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-              كلمة المرور الحالية (الافتراضية: 12345)
+              كلمة المرور الحالية
             </label>
             <div className="relative">
               <input
@@ -131,7 +131,7 @@ export const PasswordChangeModal = ({ isOpen, onClose, user, onSuccess }: Props)
                 type={showPass ? 'text' : 'password'}
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="أدخل كلمة المرور الجديدة (4 خانات فأكثر)"
+                placeholder="أدخل كلمة المرور الجديدة (6 خانات فأكثر)"
                 required
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"
               />

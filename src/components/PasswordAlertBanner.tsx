@@ -18,7 +18,7 @@ export const PasswordAlertBanner = ({ user, onOpenChangePassword, onDismiss }: P
             <ShieldAlert className="h-4 w-4 animate-bounce" />
           </div>
           <div className="text-xs sm:text-sm">
-            <span className="font-black underline decoration-white/40">تنبيه أمان هام:</span> حسابك (<span className="font-bold">{user.name}</span>) يستخدم كلمة المرور الافتراضية (<code className="font-mono bg-black/20 px-1.5 py-0.5 rounded font-bold">12345</code>). يُرجى تغييرها لحماية بيانات المتجر والمخزون.
+            <span className="font-black underline decoration-white/40">تنبيه أمان هام:</span> حسابك (<span className="font-bold">{user.name}</span>) لا يزال يستخدم كلمة مرور افتراضية مؤقتة. يُرجى تغييرها الآن لحماية بيانات المتجر والمخزون.
           </div>
         </div>
 

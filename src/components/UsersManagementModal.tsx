@@ -16,7 +16,7 @@ export const UsersManagementModal = ({ isOpen, onClose, onUsersChange, showToast
   const [newUser, setNewUser] = useState({
     username: '',
     name: '',
-    password: '12345',
+    password: '',
     role: 'cashier' as UserRole,
     branchId: 'branch-main',
   });
@@ -46,12 +46,22 @@ export const UsersManagementModal = ({ isOpen, onClose, onUsersChange, showToast
       return;
     }
 
+    const cleanPass = newUser.password.trim();
+    if (!cleanPass || cleanPass.length < 6) {
+      setError('كلمة المرور يجب أن تتكون من 6 خانات على الأقل');
+      return;
+    }
+    if (cleanPass === '12345') {
+      setError('لا يمكن استخدام كلمة المرور الافتراضية (12345)');
+      return;
+    }
+
     const branch = branches.find((b) => b.id === newUser.branchId);
 
     dbService.saveUser({
       username: cleanUsername,
       name: newUser.name.trim() || cleanUsername,
-      password: newUser.password.trim() || '12345',
+      password: cleanPass,
       role: newUser.role,
       branchId: newUser.branchId,
       branchName: branch ? branch.name : 'الفرع الرئيسي',
@@ -63,25 +73,32 @@ export const UsersManagementModal = ({ isOpen, onClose, onUsersChange, showToast
     setNewUser({
       username: '',
       name: '',
-      password: '12345',
+      password: '',
       role: 'cashier',
       branchId: 'branch-main',
     });
-    if (showToast) showToast('تم إضافة المستخدم بنجاح مع كلمة المرور الافتراضية 12345', 'success');
+    if (showToast) showToast('تم إضافة المستخدم بنجاح — سيلزم تغيير كلمة المرور عند أول دخول', 'success');
   };
 
   const handleResetPassword = (u: UserAccount) => {
-    if (confirm(`هل تريد إعادة تعيين كلمة مرور "${u.name}" إلى الافتراضية (12345)؟`)) {
-      // saveUser وحده يكفي: يخزن الهاش (طبقة db تهاش قبل الحفظ) ويعيد تفعيل
-      // إلزام تغيير كلمة المرور. الاستدعاءان السابقان كانا يكتبان مرتين.
-      dbService.saveUser({
-        ...u,
-        password: '12345',
-        mustChangePassword: true,
-      });
-      refreshList();
-      if (showToast) showToast(`تمت استعادة كلمة المرور للمستخدم ${u.name} إلى 12345`, 'info');
+    const entered = window.prompt(`أدخل كلمة مرور جديدة للمستخدم "${u.name}" (6 خانات فأكثر، غير 12345):`);
+    if (entered === null) return;
+    const cleanPass = (entered || '').trim();
+    if (!cleanPass || cleanPass.length < 6) {
+      alert('كلمة المرور يجب أن تتكون من 6 خانات على الأقل');
+      return;
     }
+    if (cleanPass === '12345') {
+      alert('لا يمكن استخدام كلمة المرور الافتراضية (12345)');
+      return;
+    }
+    dbService.saveUser({
+      ...u,
+      password: cleanPass,
+      mustChangePassword: true,
+    });
+    refreshList();
+    if (showToast) showToast(`تم تعيين كلمة مرور جديدة للمستخدم ${u.name} (ستُلزم تغييرها عند أول دخول)`, 'success');
   };
 
   const handleDeleteUser = (u: UserAccount) => {
@@ -174,7 +191,7 @@ export const UsersManagementModal = ({ isOpen, onClose, onUsersChange, showToast
                     </span>
                     {u.mustChangePassword && (
                       <span className="text-amber-600 dark:text-amber-400 font-bold text-[11px]">
-                        ⚠️ يستخدم كلمة المرور الافتراضية (12345)
+                        ⚠️ كلمة مرور افتراضية مؤقتة (يُرجى تغييرها عند أول دخول)
                       </span>
                     )}
                   </div>
@@ -185,10 +202,10 @@ export const UsersManagementModal = ({ isOpen, onClose, onUsersChange, showToast
                     type="button"
                     onClick={() => handleResetPassword(u)}
                     className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-amber-700 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 dark:text-amber-300 text-xs font-bold transition cursor-pointer"
-                    title="إعادة تعيين كلمة المرور إلى 12345"
+                    title="تعيين كلمة مرور جديدة للمستخدم"
                   >
                     <KeyRound className="w-3.5 h-3.5" />
-                    <span>إعادة تعيين لـ 12345</span>
+                    <span>تعيين كلمة مرور</span>
                   </button>
                   {!isRootAdmin && (
                     <button
@@ -305,13 +322,12 @@ export const UsersManagementModal = ({ isOpen, onClose, onUsersChange, showToast
                     <label className="block font-bold text-slate-700 dark:text-slate-300">
                       كلمة المرور الأولية
                     </label>
-                    <span className="text-[10px] text-slate-400">الافتراضية: 12345</span>
                   </div>
                   <input
                     type="text"
                     value={newUser.password}
                     onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-                    placeholder="12345"
+                    placeholder="6 خانات فأكثر"
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                   />
                   <p className="text-[10px] text-slate-400 mt-1">

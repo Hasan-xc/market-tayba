@@ -14,7 +14,7 @@ export interface UserAccount {
   id: string;
   username: string; // اسم المستخدم لتسجيل الدخول (مثل ahmed)
   name: string; // الاسم الظاهر
-  password: string; // كلمة المرور (الافتراضية 12345)
+  password: string; // كلمة المرور (مخزنة كهاش — لا افتراضي ثابت)
   pin?: string;
   role: UserRole;
   branchId?: string; // الفرع التابع له ('all' لمدير الفروع)

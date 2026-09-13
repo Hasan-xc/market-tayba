@@ -2275,6 +2275,25 @@ class CloudBackedDatabase {
     return { success: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' };
   }
 
+  /**
+   * تحديث خريطة Auth المحلية (auth_uid) لمستخدم — يلتقط تأثير best-effort
+   * من طبقة S3 دون أن يغيّر أياً من بيانات اعتماد الدخول أو الخريطة السحابية.
+   */
+  updateUserCloudMapping(username: string, authUid?: string): void {
+    const cleanUser = (username || '').trim().toLowerCase();
+    const user = this.inMemoryUsers.find((u) => u.username.toLowerCase() === cleanUser);
+    if (user) {
+      user.authUid = authUid || user.authUid;
+      this.persist(STORAGE_KEYS.USERS, this.inMemoryUsers);
+      this.inMemorySettings.users = this.inMemoryUsers;
+      if (this.currentAuthUser && this.currentAuthUser.username.toLowerCase() === cleanUser) {
+        this.currentAuthUser = user;
+        this.persist(STORAGE_KEYS.AUTH_USER, user);
+      }
+      this.notify();
+    }
+  }
+
   logout() {
     this.currentAuthUser = null;
     if (typeof window !== 'undefined') {

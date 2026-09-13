@@ -20,6 +20,8 @@ export interface UserAccount {
   branchId?: string; // الفرع التابع له ('all' لمدير الفروع)
   branchName?: string;
   mustChangePassword?: boolean;
+  authUid?: string; // معرّف حساب Supabase Auth (S3) — يرتبط عند أول دخول أونلاين
+  pendingCloudMigration?: boolean; // علم محلي: كلمة مرور < 6 لم تُنقل Auth بعد
   createdAt: string;
 }
 

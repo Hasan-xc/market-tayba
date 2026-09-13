@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { dbService } from './services/db';
 import { SupabaseService } from './services/supabase';
+import { signOutOnline } from './services/auth';
 import { Product, StoreSettings, SyncStatus, UserAccount } from './types';
 import { Header } from './components/Header';
 import { POS } from './components/POS';
@@ -188,6 +189,7 @@ export default function App() {
 
   const handleLogout = () => {
     dbService.logout();
+    signOutOnline().catch(() => {});
     setCurrentUser(null);
     setIsLoginModalOpen(true);
     showToast('تم تسجيل الخروج بنجاح', 'info');

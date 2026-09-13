@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
-import { LogIn, User, Lock, Store, Eye, EyeOff, ShieldCheck, AlertCircle } from 'lucide-react';
+import { LogIn, User, Lock, Store, Eye, EyeOff, ShieldCheck, AlertCircle, Cloud, CloudOff } from 'lucide-react';
 import { dbService } from '../services/db';
+import { appLogin } from '../services/auth';
 import { UserAccount } from '../types';
 
 interface Props {
@@ -16,6 +17,7 @@ export const LoginModal = ({ isOpen, onClose, onLoginSuccess, showCloseBtn = fal
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [cloudNote, setCloudNote] = useState<string | null>(null);
 
   const availableUsers = dbService.getUsers();
   const settings = dbService.getSettings();
@@ -25,12 +27,23 @@ export const LoginModal = ({ isOpen, onClose, onLoginSuccess, showCloseBtn = fal
   const handleLogin = (e: FormEvent) => {
     e.preventDefault();
     setError('');
+    setCloudNote(null);
     setIsLoading(true);
 
     setTimeout(async () => {
-      const res = await dbService.login(username, password);
+      const res = await appLogin(username, password);
       setIsLoading(false);
       if (res.success && res.user) {
+        // ملاحظة أونلاين غير معطِّلة: JIT/جلسة/مشكلة كلمة مرور قصيرة
+        if (res.cloud?.mode === 'jit') {
+          setCloudNote('تم إنشاء حسابك السحابي تلقائياً (ترحيل JIT) وتفعيل جلستك.');
+        } else if (res.cloud?.mode === 'signin' || res.cloud?.mode === 'already-exists') {
+          setCloudNote('جلستك السحابية مفعّلة ومخزنة محلياً.');
+        } else if (res.cloud?.reason === 'password-too-short') {
+          setCloudNote('كلمة المرور أقصر من 6 خانات — الدخول المحلي يعمل، والترحيل السحابي بانتظار رفعها أو خفض الحد الأدنى.');
+        } else if (res.cloud && res.cloud.mode === 'offline-only' && typeof navigator !== 'undefined' && !navigator.onLine) {
+          setCloudNote('لا إنترنت — وضع أوفلاين كامل حتى تتصل الشبكة.');
+        }
         onLoginSuccess(res.user);
         if (onClose) onClose();
       } else {
@@ -184,6 +197,13 @@ export const LoginModal = ({ isOpen, onClose, onLoginSuccess, showCloseBtn = fal
             </button>
           )}
         </div>
+
+        {cloudNote && (
+          <div className="mt-3 p-3 rounded-2xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 text-[11px] font-bold text-sky-700 dark:text-sky-300 flex items-start gap-2 leading-relaxed" dir="rtl">
+            {cloudNote.includes('أوفلاين') ? <CloudOff className="w-4 h-4 shrink-0 mt-0.5" /> : <Cloud className="w-4 h-4 shrink-0 mt-0.5" />}
+            <span>{cloudNote}</span>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -975,18 +975,35 @@ export class SupabaseService {
         created_at: sale.createdAt || new Date().toISOString(),
       };
 
+      // أعمدة الفرع والحالة — تُكتب إن وُجدت بالسحابة (تُشغّل بسكربت ALTER).
+      // إن لم تكن موجودة بعد: upsert يفشل بعمود مجهول → نجرّد الحقول ونعيد المحاولة.
+      const branchFields: Record<string, any> = {
+        branch_id: sale.branchId || 'branch-main',
+        branch_name: sale.branchName || null,
+        status: sale.status || 'completed',
+      };
+      let payloadWithBranch = { ...invoicePayload, ...branchFields };
+
       // إجراء Upsert للفاتورة في جدول sales
-      const saleOp = await this.executeResilientOperation(
+      let saleOp = await this.executeResilientOperation(
         (p) => client.from('sales').upsert(p, { onConflict: 'id' }),
-        invoicePayload
+        payloadWithBranch
       );
+      if (!saleOp.success && saleOp.error && /branch_id|branch_name|status|does not exist|column/i.test(String(saleOp.error))) {
+        // الأعمدة غير موجودة بعد — جرّد الحقول الإضافية وأعد بلا كسر المزامنة
+        payloadWithBranch = { ...invoicePayload };
+        saleOp = await this.executeResilientOperation(
+          (p) => client.from('sales').upsert(p, { onConflict: 'id' }),
+          payloadWithBranch
+        );
+      }
 
       if (!saleOp.success) {
         // محاولة بديلة بالإدراج — يجب فحص نتيجتها: الإرجاع الأعمى لـ true كان
         // يعلّم الفاتورة isSynced ويمنع إعادة المحاولة عبر طابور الأوفلاين
         const insertOp = await this.executeResilientOperation(
           (p) => client.from('sales').insert(p),
-          invoicePayload
+          payloadWithBranch
         );
         if (!insertOp.success) {
           console.warn('Supabase sale sync failed (upsert + insert):', insertOp.error);
@@ -1115,13 +1132,20 @@ export class SupabaseService {
           custom_reason_text: ret.customReasonText || null,
           action_taken: ret.actionTaken,
           cashier_name: ret.cashierName,
+          branch_id: ret.branchId || null,
+          branch_name: ret.branchName || null,
           notes: ret.notes || null,
           created_at: ret.createdAt,
         };
 
-        // محاولة الإدخال
-        const { error: insertErr } = await client.from('returns').upsert(payload, { onConflict: 'id' });
-        
+        // محاولة الإدخال (بأعمدة الفرع إن وُجدت — وإلا تُجرَّد وتُعاد بلا كسر)
+        let insertErr: any = null;
+        ({ error: insertErr } = await client.from('returns').upsert(payload, { onConflict: 'id' }));
+        if (insertErr && /branch_id|branch_name|does not exist|column/i.test(String(insertErr?.message || insertErr))) {
+          const { branch_id: _b, branch_name: _bn, ...payloadPlain } = payload;
+          ({ error: insertErr } = await client.from('returns').upsert(payloadPlain, { onConflict: 'id' }));
+        }
+
         // إذا فشل بسبب نوع id (مثلاً BIGSERIAL) نجرب بدون id
         if (insertErr) {
           const { id: _, ...payloadWithoutId } = payload;
@@ -1564,6 +1588,9 @@ export class SupabaseService {
               cashierName: cs.cashier_name || 'الكاشير',
               customerId: cs.customer_id || undefined,
               customerName: cs.customer_name || undefined,
+              branchId: cs.branch_id || undefined,
+              branchName: cs.branch_name || undefined,
+              status: cs.status || undefined,
               createdAt: soldAt,
               isSynced: true,
             };
@@ -1597,6 +1624,8 @@ export class SupabaseService {
             customReasonText: cr.custom_reason_text || undefined,
             actionTaken: cr.action_taken || 'restock',
             cashierName: cr.cashier_name || 'الكاشير',
+            branchId: cr.branch_id || undefined,
+            branchName: cr.branch_name || undefined,
             notes: cr.notes || undefined,
             createdAt: cr.created_at || new Date().toISOString(),
             isSynced: true,

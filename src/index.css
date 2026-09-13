@@ -1,0 +1,118 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  html, body {
+    touch-action: pan-x pan-y;
+    -webkit-text-size-adjust: 100%;
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+  body {
+    background-color: #f8fafc;
+    color: #0f172a;
+  }
+  html.dark body, body.dark {
+    background-color: #020617;
+    color: #f8fafc;
+  }
+}
+
+/* Print Rules for 80mm / 58mm POS Thermal Printers */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #thermalReceiptContent,
+  #thermalReceiptContent * {
+    visibility: visible;
+  }
+  #thermalReceiptContent {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 80mm;
+    margin: 0;
+    padding: 2mm 4mm;
+    font-size: 11px;
+    background: white !important;
+    color: black !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out forwards;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+.dark ::-webkit-scrollbar-track,
+html.dark ::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+.dark ::-webkit-scrollbar-thumb,
+html.dark ::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+.dark ::-webkit-scrollbar-thumb:hover,
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* HTML5 Barcode Scanner Styling */
+#barcode-camera-viewport {
+  width: 100% !important;
+  min-height: 290px !important;
+  background-color: #020617 !important;
+  position: relative !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+#barcode-camera-viewport video {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 290px !important;
+  object-fit: cover !important;
+  display: block !important;
+}
+
+#barcode-camera-viewport img[alt="Info icon"] {
+  display: none !important;
+}
+
+#barcode-camera-viewport #qr-shaded-region {
+  border-color: rgba(16, 185, 129, 0.4) !important;
+}

@@ -1,0 +1,10 @@
+{
+  "name": "ماركت طيبه برو ماكس",
+  "description": "نظام كاشير ومخزون ومبيعات متكامل لماركت طيبه مع دعم العمل بدون إنترنت والمزامنة السحابية الفورية.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

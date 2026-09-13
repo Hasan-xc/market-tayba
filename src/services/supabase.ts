@@ -14,6 +14,42 @@ let realtimeChannel: RealtimeChannel | null = null;
 let isRealtimeStarted = false;
 let realtimeStatus: 'connected' | 'connecting' | 'disconnected' = 'disconnected';
 
+let lastAttachedSessionFingerprint = '';
+
+// مفتاح جلسة Auth المخزّنة من عميل S3 (نفس صيغة supabase-js: sb-<ref>-auth-token)
+function storedAuthTokenKeyFor(url: string): string | null {
+  try {
+    const host = new URL(url).hostname;
+    return `sb-${host.split('.')[0]}-auth-token`;
+  } catch {
+    return null;
+  }
+}
+
+/** ربط جلسة S3 المخزّنة بعميل المزامنة حتى تحمل المكالمات auth.uid() لمصفوفة RLS (S4) */
+async function attachStoredAuthSession(client: SupabaseClient, url: string): Promise<void> {
+  try {
+    if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
+    const key = storedAuthTokenKeyFor(url);
+    if (!key) return;
+    const raw = localStorage.getItem(key);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    const accessToken = parsed?.access_token;
+    const refreshToken = parsed?.refresh_token;
+    if (!accessToken || !refreshToken) return;
+    const fingerprint = `${accessToken}:${refreshToken}`;
+    if (lastAttachedSessionFingerprint === fingerprint) return;
+    lastAttachedSessionFingerprint = fingerprint; // لا إعادة محاولة لنفس التوكن (أو الفاشل)
+    const { error } = await client.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+    if (error) {
+      console.warn('[supabase] session attach ignored:', error.message);
+    }
+  } catch (e) {
+    console.warn('[supabase] session attach ignored (fallback anon):', (e as any)?.message || e);
+  }
+}
+
 const realtimeStatusListeners = new Set<(status: 'connected' | 'connecting' | 'disconnected') => void>();
 const realtimeUpdateListeners = new Set<(event: { table: string; eventType: string; data?: any }) => void>();
 
@@ -108,6 +144,7 @@ export class SupabaseService {
     }
 
     if (cachedClient) {
+      void attachStoredAuthSession(cachedClient, url);
       return cachedClient;
     }
 
@@ -120,11 +157,29 @@ export class SupabaseService {
           },
         },
       });
+      void attachStoredAuthSession(cachedClient, url);
       return cachedClient;
     } catch (err) {
       console.error('Failed to initialize Supabase client:', err);
       return null;
     }
+  }
+
+  /** تعليق فوري بجلسة S3 المخزّنة (يُستدعى عند التشغيل وبعد الدخول) */
+  static async attachAuthSession(): Promise<void> {
+    const settings = dbService.getSettings();
+    const url = (settings.supabaseUrl || ENV_SUPABASE_URL || DEFAULT_SUPABASE_URL).trim();
+    const client = this.getClient();
+    if (client) await attachStoredAuthSession(client, url);
+  }
+
+  /** إعادة إنشاء عميل المزامنة من الصفر (بعد الخروج) */
+  static resetClient(): void {
+    cachedClient = null;
+    lastAttachedSessionFingerprint = '';
+    isRealtimeStarted = false;
+    realtimeChannel?.unsubscribe();
+    realtimeChannel = null;
   }
 
   /**

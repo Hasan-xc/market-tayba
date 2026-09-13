@@ -190,6 +190,7 @@ export default function App() {
   const handleLogout = () => {
     dbService.logout();
     signOutOnline().catch(() => {});
+    SupabaseService.resetClient();
     setCurrentUser(null);
     setIsLoginModalOpen(true);
     showToast('تم تسجيل الخروج بنجاح', 'info');

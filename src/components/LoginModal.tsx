@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { LogIn, User, Lock, Store, Eye, EyeOff, ShieldCheck, AlertCircle, Cloud, CloudOff } from 'lucide-react';
 import { dbService } from '../services/db';
 import { appLogin } from '../services/auth';
+import { SupabaseService } from '../services/supabase';
 import { UserAccount } from '../types';
 
 interface Props {
@@ -44,6 +45,7 @@ export const LoginModal = ({ isOpen, onClose, onLoginSuccess, showCloseBtn = fal
         } else if (res.cloud && res.cloud.mode === 'offline-only' && typeof navigator !== 'undefined' && !navigator.onLine) {
           setCloudNote('لا إنترنت — وضع أوفلاين كامل حتى تتصل الشبكة.');
         }
+        void SupabaseService.attachAuthSession();
         onLoginSuccess(res.user);
         if (onClose) onClose();
       } else {

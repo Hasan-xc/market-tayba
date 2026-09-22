@@ -20,7 +20,8 @@ import {
   Building2,
   Warehouse,
   History,
-  PackageMinus
+  PackageMinus,
+  Scale
 } from 'lucide-react';
 import { Product, StoreSettings, UserAccount, Branch } from '../types';
 import { dbService } from '../services/db';
@@ -89,6 +90,8 @@ export const Inventory = ({ settings, products, currentUser, onDataChange, showT
   const [unit, setUnit] = useState('حبة');
   // الفرع المستهدف لإضافة/تعديل المنتج
   const [targetBranchId, setTargetBranchId] = useState<string>('branch-main');
+  // منتج بالوزن/بكمية حرة (بدون باركود مطبوع)
+  const [isWeightedProduct, setIsWeightedProduct] = useState(false);
 
   const categories = ['all', ...Array.from(new Set(products.map((p) => p.category || 'عام')))];
 
@@ -120,6 +123,7 @@ export const Inventory = ({ settings, products, currentUser, onDataChange, showT
     setMinAlert('5');
     setUnit('حبة');
     setQuantity('10');
+    setIsWeightedProduct(false);
 
     // تحديد الفرع المستهدف: الفرع المختار حالياً أو الفرع النشط
     const resolvedBranchId = selectedBranchFilter !== 'all' 
@@ -139,6 +143,7 @@ export const Inventory = ({ settings, products, currentUser, onDataChange, showT
     setSalePrice(product.salePrice.toString());
     setMinAlert(product.minQuantityAlert.toString());
     setUnit(product.unit || 'حبة');
+    setIsWeightedProduct(!!product.isWeighted);
 
     const bq = dbService.ensureBranchQuantities(product);
     const prodBranch = product.branchId || 'branch-main';
@@ -159,7 +164,11 @@ export const Inventory = ({ settings, products, currentUser, onDataChange, showT
     const cleanBarcode = barcode.trim();
     const cleanName = name.trim();
 
-    if (!cleanBarcode) {
+    // المنتجات الموزونة (بدون باركود مطبوع): يُولَّد باركود داخلي تلقائياً إن ترك فارغاً
+    // — يحمي مسارات المطابقة والسحابة دون أن يُطبع على المنتج أبداً
+    const finalBarcode = cleanBarcode || (isWeightedProduct ? `628${Math.floor(100000000 + Math.random() * 900000000)}` : '');
+
+    if (!finalBarcode) {
       showToast('يرجى إدخال أو توليد الباركود', 'warn');
       return;
     }
@@ -196,7 +205,7 @@ export const Inventory = ({ settings, products, currentUser, onDataChange, showT
 
       const savedProd = dbService.saveProduct({
         id: editingProduct?.id,
-        barcode: cleanBarcode,
+        barcode: finalBarcode,
         name: cleanName,
         category: category.trim() || 'عام',
         purchasePrice: numPurchase,
@@ -209,6 +218,7 @@ export const Inventory = ({ settings, products, currentUser, onDataChange, showT
         },
         minQuantityAlert: numAlert,
         unit: unit.trim() || 'حبة',
+        isWeighted: isWeightedProduct || undefined,
       });
 
       // رفع فوري وسريع إلى سحابة Supabase
@@ -705,10 +715,31 @@ export const Inventory = ({ settings, products, currentUser, onDataChange, showT
                 </div>
               )}
 
+              {/* Toggle: منتج بالوزن / بدون باركود */}
+              <label className="flex items-center gap-2.5 p-2.5 rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isWeightedProduct}
+                  onChange={(e) => setIsWeightedProduct(e.target.checked)}
+                  className="rounded text-amber-600 focus:ring-amber-500 h-4 w-4 shrink-0"
+                />
+                <div className="text-xs">
+                  <span className="font-bold text-amber-800 dark:text-amber-300 block flex items-center gap-1.5">
+                    <Scale className="h-3.5 w-3.5" />
+                    منتج بالوزن / بدون باركود (يُباع بالكيلو أو المبلغ الحر)
+                  </span>
+                  <span className="text-[11px] text-amber-700/80 dark:text-amber-400/80">
+                    مثل: جبنة، زيتون، مكسرات — باركود داخلي يُولَّد تلقائياً ولا يُطبع
+                  </span>
+                </div>
+              </label>
+
               {/* Barcode & Scan & Auto-generate */}
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 text-[11px]">الباركود (رقم الصنف)</label>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 text-[11px]">
+                    {isWeightedProduct ? 'الباركود الداخلي (توليد تلقائي — لا يُطبع)' : 'الباركود (رقم الصنف)'}
+                  </label>
                   <button
                     type="button"
                     onClick={generateBarcode}
@@ -722,8 +753,8 @@ export const Inventory = ({ settings, products, currentUser, onDataChange, showT
                 <div className="flex gap-1.5">
                   <input
                     type="text"
-                    required
-                    placeholder="امسح أو اكتب أو ولد باركود..."
+                    required={!isWeightedProduct}
+                    placeholder={isWeightedProduct ? 'اختياري — يُولَّد تلقائياً...' : 'امسح أو اكتب أو ولد باركود...'}
                     value={barcode}
                     onChange={(e) => setBarcode(e.target.value)}
                     className="flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 py-1.5 px-3 font-mono text-xs font-bold text-slate-900 dark:text-white focus:border-emerald-600 dark:focus:border-emerald-500 focus:outline-none"
@@ -798,13 +829,15 @@ export const Inventory = ({ settings, products, currentUser, onDataChange, showT
                   />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 text-[11px] mb-1">سعر البيع للزبون</label>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 text-[11px] mb-1">
+                    {isWeightedProduct ? 'سعر الكيلو/الوحدة (للزبون)' : 'سعر البيع للزبون'}
+                  </label>
                   <input
                     type="number"
                     step="0.25"
                     min="0"
                     required
-                    placeholder="0.00"
+                    placeholder={isWeightedProduct ? 'سعر الكيلو/الوحدة: 120' : '0.00'}
                     value={salePrice}
                     onChange={(e) => setSalePrice(e.target.value)}
                     className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 py-1.5 px-2.5 font-mono text-xs font-bold text-emerald-700 dark:text-emerald-400 focus:border-emerald-600 dark:focus:border-emerald-500 focus:outline-none"
@@ -838,11 +871,13 @@ export const Inventory = ({ settings, products, currentUser, onDataChange, showT
               {/* Quantity & Alert Threshold */}
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 text-[11px] mb-1">الكمية المتوفرة بالمخزن</label>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 text-[11px] mb-1">
+                    {isWeightedProduct ? 'الكمية المتوفرة (بالكيلو/الوحدة — عشرية مثل 2.5)' : 'الكمية المتوفرة بالمخزن'}
+                  </label>
                   <input
                     type="number"
                     min="0"
-                    step="1"
+                    step={isWeightedProduct ? '0.01' : '1'}
                     required
                     placeholder="0"
                     value={quantity}

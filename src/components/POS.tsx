@@ -27,12 +27,14 @@ import {
   Printer,
   Eye,
   ChevronDown,
-  Building2
+  Building2,
+  Scale
 } from 'lucide-react';
 import { Product, CartItem, SaleTransaction, StoreSettings, ParkedCart, Customer, UserAccount } from '../types';
 import { dbService } from '../services/db';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 import { ReceiptModal } from './ReceiptModal';
+import { WeightEntryModal } from './WeightEntryModal';
 import { matchProductSearch, normalizeArabicText } from '../utils/search';
 import { SoundService } from '../utils/audio';
 
@@ -49,6 +51,8 @@ export const POS = ({ settings, products, currentUser, onDataChange, showToast }
   const [barcodeInput, setBarcodeInput] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [isScannerOpen, setIsScannerOpen] = useState(false);
+  // منتج الوزن/الكمية الحرة المنتظر إدخال وزنه أو مبلغه قبل إضافته للسلة
+  const [weightModalProduct, setWeightModalProduct] = useState<Product | null>(null);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'credit'>('cash');
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
@@ -141,7 +145,13 @@ export const POS = ({ settings, products, currentUser, onDataChange, showToast }
   };
 
   // إضافة منتج للسلة بالاعتماد على مخزون الفرع الحالي
-  const addToCart = (product: Product, quantityToAdd = 1) => {
+  const addToCart = (product: Product, quantityToAdd = 1, fromWeightModal = false) => {
+    // منتجات الوزن/الكمية الحرة: تفتح نافذة إدخال الوزن أو المبلغ بدل الإضافة المباشرة
+    if (product.isWeighted && !fromWeightModal) {
+      setWeightModalProduct(product);
+      return;
+    }
+
     const branchStock = dbService.getProductStock(product, activeBranchId);
     if (branchStock <= 0) {
       if (isSoundEnabled) SoundService.playWarning();
@@ -832,7 +842,14 @@ export const POS = ({ settings, products, currentUser, onDataChange, showToast }
                 )}
 
                 <div>
-                  <div className="text-[9px] font-medium text-slate-400 dark:text-slate-500 font-mono line-clamp-1">{p.barcode}</div>
+                  {p.isWeighted ? (
+                    <div className="text-[9px] font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                      <Scale className="h-3 w-3" />
+                      <span>منتج بالوزن</span>
+                    </div>
+                  ) : (
+                    <div className="text-[9px] font-medium text-slate-400 dark:text-slate-500 font-mono line-clamp-1">{p.barcode}</div>
+                  )}
                   <h4 className="font-bold text-[11px] text-slate-800 dark:text-slate-100 line-clamp-2 leading-tight mt-0.5 min-h-[1.75rem]">
                     {p.name}
                   </h4>
@@ -855,7 +872,9 @@ export const POS = ({ settings, products, currentUser, onDataChange, showToast }
                     <span className="font-mono font-black text-xs text-emerald-800 dark:text-emerald-400">
                       {p.salePrice.toFixed(2)}
                     </span>
-                    <span className="text-[9px] text-slate-500 dark:text-slate-400 mr-0.5">{settings.currency}</span>
+                    <span className="text-[9px] text-slate-500 dark:text-slate-400 mr-0.5">
+                      {settings.currency}{p.isWeighted ? `/${p.unit || 'كجم'}` : ''}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -1262,6 +1281,18 @@ export const POS = ({ settings, products, currentUser, onDataChange, showToast }
       />
 
       {/* مودال الفاتورة الحرارية */}
+      {/* نافذة بيع المنتجات بالوزن/بكمية حرة (بدون باركود مطبوع) */}
+      <WeightEntryModal
+        isOpen={!!weightModalProduct}
+        onClose={() => setWeightModalProduct(null)}
+        product={weightModalProduct}
+        activeBranchId={activeBranchId}
+        onConfirm={(qty) => {
+          if (weightModalProduct) addToCart(weightModalProduct, qty, true);
+        }}
+        showToast={showToast}
+      />
+
       <ReceiptModal
         isOpen={isReceiptOpen}
         onClose={() => setIsReceiptOpen(false)}

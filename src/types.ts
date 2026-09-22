@@ -60,6 +60,7 @@ export interface Product {
   quantity: number;
   minQuantityAlert: number;
   unit?: string; // قطعة، كجم، لتر، علبة، كيس
+  isWeighted?: boolean; // منتج بالوزن/بكمية حرة بدون باركود مطبوع — يُباع بالكيلو/الوحدة الحرة (باركود داخلي تلقائي لا يُطبع)
   imageUrl?: string;
   branchId?: string; // 'all' أو معرف فرع محدد مثل 'branch-main' أو 'branch-sharshi'
   branchName?: string;

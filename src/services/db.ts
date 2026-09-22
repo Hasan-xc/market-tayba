@@ -2322,6 +2322,53 @@ class CloudBackedDatabase {
     return changed;
   }
 
+  // استبدال كامل لقائمة الموردين (يُستخدم عند السحب من السحابة بعد تصفير الكاش)
+  setSuppliers(suppliers: Supplier[]) {
+    this.inMemorySuppliers = suppliers;
+    this.persist(STORAGE_KEYS.SUPPLIERS, this.inMemorySuppliers);
+    this.notify();
+  }
+
+  // استبدال سندات التحويل (يُستخدم عند السحب من السحابة بعد تصفير الكاش)
+  setTransfers(transfers: StockTransfer[]) {
+    this.inMemoryTransfers = transfers;
+    this.persist(STORAGE_KEYS.TRANSFERS, this.inMemoryTransfers);
+    this.notify();
+  }
+
+  /**
+   * تصفير الكاش المحلي للكيانات المتزامنة مع Supabase (زر إداري يدوي — إعادة مزامنة كاملة).
+   * يُمسح: PRODUCTS, CUSTOMERS, SUPPLIERS, STOCK_AUDIT, TRANSFERS
+   * يبقى: SALES, RETURNS, DEBT_TRANSACTIONS, SHIFTS, PARKED_CARTS, SETTINGS, BRANCHES, USERS
+   * لا يُحذف أي شيء من Supabase نفسه — محلي فقط، ثم يعاد السحب فوراً.
+   */
+  wipeLocalCacheForRepull(): { cleared: string[] } {
+    const cleared: string[] = [];
+
+    this.inMemoryProducts = [];
+    localStorage.removeItem(STORAGE_KEYS.PRODUCTS);
+    cleared.push('المنتجات');
+
+    this.inMemoryCustomers = [];
+    localStorage.removeItem(STORAGE_KEYS.CUSTOMERS);
+    cleared.push('العملاء');
+
+    this.inMemorySuppliers = [];
+    localStorage.removeItem(STORAGE_KEYS.SUPPLIERS);
+    cleared.push('الموردين');
+
+    this.inMemoryStockAuditLogs = [];
+    localStorage.removeItem(STORAGE_KEYS.STOCK_AUDIT);
+    cleared.push('حركات المخزون');
+
+    this.inMemoryTransfers = [];
+    localStorage.removeItem(STORAGE_KEYS.TRANSFERS);
+    cleared.push('سندات التحويل');
+
+    this.notify();
+    return { cleared };
+  }
+
   // ==== إدارة السلات المعلقة (Parked Carts) ====
   getParkedCarts(): ParkedCart[] {
     return this.inMemoryParkedCarts;

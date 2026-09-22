@@ -130,6 +130,9 @@ export const Header = ({
   // حالة زر تثبيت التطبيق (PWA)
   const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
 
+  // حالة زر إعادة المزامنة الكاملة من السحابة (تصفير الكاش المحلي)
+  const [isResyncing, setIsResyncing] = useState(false);
+
   const branches = dbService.getBranches();
   const activeBranchId = dbService.getActiveBranchId();
   const activeBranch = activeBranchId === 'all'
@@ -274,6 +277,69 @@ export const Header = ({
       console.warn('Install prompt failed:', err);
     }
     setInstallPromptEvent(null);
+  };
+
+  // ==== إعادة مزامنة كاملة من السحابة (تصفير الكاش المحلي ثم إعادة السحب) ====
+  const handleFullResyncFromCloud = async () => {
+    // الحارس المدمج: يرفض التنفيذ إذا كان طابور الأوفلاين يحتوي عمليات غير متزامنة
+    const queue = dbService.getOfflineQueue();
+    if (queue.length > 0) {
+      const details = queue
+        .map((m) => `• ${m.type} — ${new Date(m.timestamp).toLocaleString('ar-SA')}`)
+        .join('\n');
+      window.confirm(
+        `⚠️ لا يمكن التنفيذ: يوجد ${queue.length} عملية غير متزامنة في طابور الأوفلاين:\n\n${details}\n\n` +
+        'افتح «طابور المزامنة» من القائمة الجانبية ووفّر مزامنتها أولاً (أو قرر تجاهلها) ثم أعد المحاولة.'
+      );
+      return;
+    }
+
+    if (!navigator.onLine || !SupabaseService.isConfigured()) {
+      alert('لا يمكن التنفيذ بدون اتصال بالإنترنت واتصال Supabase مفعّل.');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      'سيتم مسح البيانات المحلية وإعادة تحميلها من السحابة، المبيعات لن تتأثر.\n\n' +
+      '🗑️ سيُمسح ويُسحب من جديد: المنتجات، العملاء، الموردين، حركات المخزون، سندات التحويل.\n' +
+      '🔒 لن يُمسّ إطلاقاً: المبيعات، المرتجعات، الديون، الورديات، السلات المعلقة، الإعدادات.\n' +
+      '☁️ لن يُحذف أي شيء من Supabase نفسه — العملية محلية فقط.\n\n' +
+      'هل تريد المتابعة؟'
+    );
+    if (!confirmed) return;
+
+    setIsResyncing(true);
+    try {
+      // 1) دفع الموردين المحليين للسحابة قبل المسح (معظمهم push-only)
+      const pushedSuppliers = await SupabaseService.backfillSuppliersToCloud();
+
+      // 2) تصفير الكاش المحلي للكيانات المعتمدة
+      const res = dbService.wipeLocalCacheForRepull();
+
+      // 3) إعادة السحب فوراً: products + customers + audit عبر pullFromSupabase
+      // (دمج غير مدمِّر — الفواتير المحلية غير المتزامنة محمية بالتصميم)
+      const pullResult = await SupabaseService.pullFromSupabase();
+
+      // 4) سحب الموردين والتحويلات (لا توجد لهما سحب في pullFromSupabase)
+      const suppliersCount = await SupabaseService.pullSuppliersFromSupabase();
+      const transfersCount = await SupabaseService.pullStockTransfersFromSupabase();
+
+      alert(
+        'تم تصفير الكاش المحلي وإعادة تحميله من السحابة بنجاح ✅\n\n' +
+        `• موردين دُفعوا للسحابة قبل المسح: ${pushedSuppliers}\n` +
+        `• منتجات مسحوبة: ${pullResult.productsCount ?? '?'}\n` +
+        `• عملاء مسحوبون: ${pullResult.customersCount ?? '?'}\n` +
+        `• حركات مخزون مسحوبة: ${pullResult.auditCount ?? '?'}\n` +
+        `• موردين مسحوبين: ${suppliersCount}\n` +
+        `• تحويلات مسحوبة: ${transfersCount}\n\n` +
+        `المُمسوح فعلياً: ${res.cleared.join('، ')}\n` +
+        'المبيعات والمرتجعات والديون والورديات لم تُمسّ.'
+      );
+    } catch (err: any) {
+      alert('فشلت إعادة المزامنة: ' + (err?.message || err) + '\nبياناتك المحلية المتبقية (مبيعات وغيرها) سليمة.');
+    } finally {
+      setIsResyncing(false);
+    }
   };
 
   useEffect(() => {
@@ -1552,6 +1618,34 @@ export const Header = ({
                   <KeyRound className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
                   <span>تغيير كلمة المرور الخاصة بحسابي ({currentUser?.name || 'أحمد'})</span>
                 </button>
+              </div>
+
+              {/* قسم متقدم: إعادة مزامنة كاملة من السحابة (تصفير الكاش المحلي) */}
+              <div className="space-y-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <h4 className="font-bold text-slate-900 dark:text-white text-xs flex items-center gap-1.5">
+                  <RefreshCw className="h-4 w-4 text-rose-600 dark:text-rose-400" />
+                  إعادة مزامنة كاملة من السحابة (أداة متقدمة)
+                </h4>
+                <p className="text-[11px] leading-snug text-slate-500 dark:text-slate-400">
+                  تصفير الكاش المحلي القديم للمنتجات والعملاء والموردين وحركات المخزون والتحويلات، ثم إعادة سحبهم فوراً من Supabase.
+                  المبيعات والمرتجعات والديون والورديات لن تتأثر إطلاقاً، ولا يُحذف أي شيء من السحابة.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleFullResyncFromCloud}
+                  disabled={isResyncing}
+                  className={`w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-bold transition cursor-pointer active:scale-95 border ${
+                    isResyncing
+                      ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed'
+                      : 'bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-900/60'
+                  }`}
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${isResyncing ? 'animate-spin' : ''}`} />
+                  <span>{isResyncing ? 'جاري تصفير الكاش وإعادة السحب...' : 'إعادة مزامنة كاملة من السحابة'}</span>
+                </button>
+                <p className="text-[10px] text-slate-400 dark:text-slate-500">
+                  تنفيذ يدوي فقط — الزر يرفض العمل إذا كان طابور الأوفلاين يحتوي عمليات غير متزامنة.
+                </p>
               </div>
 
               {/* زر الحفظ */}

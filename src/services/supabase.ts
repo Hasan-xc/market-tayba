@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
-import { Product, SaleTransaction, ReturnRecord, StoreSettings, Customer, DebtTransaction, StockAuditLog, Supplier } from '../types';
+import { Product, SaleTransaction, ReturnRecord, StoreSettings, Customer, DebtTransaction, StockAuditLog, Supplier, StockTransfer } from '../types';
 import { dbService, SEED_PRODUCTS, DEFAULT_SETTINGS } from './db';
 
 export const DEFAULT_SUPABASE_URL = 'https://qvfunbtrgdhtqlmjwdzc.supabase.co';
@@ -1346,6 +1346,78 @@ export class SupabaseService {
       return result.success;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * دفع كل الموردين المحليين إلى السحابة (يُنفَّذ قبل تصفير الكاش المحلي
+   * حتى لا يفقد المستخدم موردين معظمهم push-only وغير موجودين سابقاً في السحابة)
+   */
+  static async backfillSuppliersToCloud(): Promise<number> {
+    const suppliers = dbService.getSuppliers();
+    let pushed = 0;
+    for (const s of suppliers) {
+      const ok = await this.syncSupplier(s);
+      if (ok) pushed++;
+    }
+    return pushed;
+  }
+
+  /**
+   * سحب الموردين من Supabase وتعويض القائمة المحلية بالكامل
+   * (الجزء الذي يكمل دالة إعادة المزامنة الكاملة — الموردين push-only أصلاً)
+   */
+  static async pullSuppliersFromSupabase(): Promise<number> {
+    const client = this.getClient();
+    if (!client || !navigator.onLine) return 0;
+    try {
+      const { data, error } = await client.from('suppliers').select('*');
+      if (error || !data) return 0;
+      const mapped: Supplier[] = data.map((cs: any) => ({
+        id: String(cs.id),
+        name: cs.name || 'مورد',
+        company: cs.company || undefined,
+        phone: cs.phone || undefined,
+        address: cs.address || undefined,
+        balance: Number(cs.balance) || 0,
+        notes: cs.notes || undefined,
+        createdAt: cs.created_at || new Date().toISOString(),
+      }));
+      dbService.setSuppliers(mapped);
+      return mapped.length;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * سحب سندات التحويل المخزني من Supabase (لا توجد دالة سحب لها في pullFromSupabase)
+   */
+  static async pullStockTransfersFromSupabase(): Promise<number> {
+    const client = this.getClient();
+    if (!client || !navigator.onLine) return 0;
+    try {
+      const { data, error } = await client.from('stock_transfers').select('*');
+      if (error || !data) return 0;
+      const mapped: StockTransfer[] = data.map((ct: any) => ({
+        id: String(ct.id),
+        transferNumber: ct.transfer_number || `TR-${ct.id}`,
+        sourceBranchId: ct.source_branch_id || '',
+        sourceBranchName: ct.source_branch_name || 'فرع المصدر',
+        targetBranchId: ct.target_branch_id || '',
+        targetBranchName: ct.target_branch_name || 'فرع الاستلام',
+        items: Array.isArray(ct.items) ? ct.items : [],
+        totalQuantity: Number(ct.total_quantity) || 0,
+        status: (ct.status as StockTransfer['status']) || 'completed',
+        notes: ct.notes || undefined,
+        transferredBy: ct.transferred_by || 'النظام',
+        createdAt: ct.created_at || new Date().toISOString(),
+        isSynced: true,
+      }));
+      dbService.setTransfers(mapped);
+      return mapped.length;
+    } catch {
+      return 0;
     }
   }
 

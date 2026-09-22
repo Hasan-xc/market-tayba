@@ -1,0 +1,27 @@
+{
+  "name": "ماركت طيبه برو ماكس - نظام الكاشير ونقاط البيع",
+  "short_name": "ماركت طيبه",
+  "description": "نظام كاشير ومخزون ومبيعات متكامل لماركت طيبه مع دعم العمل بدون إنترنت والمزامنة السحابية الفورية.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "dir": "rtl",
+  "lang": "ar",
+  "background_color": "#020617",
+  "theme_color": "#10b981",
+  "icons": [
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

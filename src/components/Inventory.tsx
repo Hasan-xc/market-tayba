@@ -19,13 +19,15 @@ import {
   ArrowLeftRight,
   Building2,
   Warehouse,
-  History
+  History,
+  PackageMinus
 } from 'lucide-react';
 import { Product, StoreSettings, UserAccount, Branch } from '../types';
 import { dbService } from '../services/db';
 import { SupabaseService } from '../services/supabase';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 import { StockTransferModal } from './StockTransferModal';
+import { DamageReturnModal } from './DamageReturnModal';
 import { matchProductSearch } from '../utils/search';
 
 interface Props {
@@ -44,6 +46,7 @@ export const Inventory = ({ settings, products, currentUser, onDataChange, showT
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [transferInitialProductId, setTransferInitialProductId] = useState<string | undefined>(undefined);
+  const [damageProduct, setDamageProduct] = useState<Product | null>(null);
   const [editingProduct, setEditingProduct] = useState<Partial<Product> | null>(null);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const [newlySavedId, setNewlySavedId] = useState<string | null>(null);
@@ -572,6 +575,14 @@ export const Inventory = ({ settings, products, currentUser, onDataChange, showT
                               <ArrowLeftRight className="h-4 w-4" />
                             </button>
                           )}
+                          {/* زر الإتلاف / الإرجاع للمصنع */}
+                          <button
+                            onClick={() => setDamageProduct(p)}
+                            className="p-1.5 text-slate-500 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-lg transition cursor-pointer"
+                            title="إتلاف / إرجاع للمصنع"
+                          >
+                            <PackageMinus className="h-4 w-4" />
+                          </button>
                           <button
                             onClick={() => openEditModal(p)}
                             className="p-1.5 text-slate-600 dark:text-slate-300 hover:text-emerald-700 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg transition cursor-pointer"
@@ -894,6 +905,16 @@ export const Inventory = ({ settings, products, currentUser, onDataChange, showT
         onTransferSuccess={() => {
           onDataChange();
         }}
+        showToast={showToast}
+      />
+
+      {/* نافذة الإتلاف / الإرجاع للمصنع والمورد */}
+      <DamageReturnModal
+        isOpen={!!damageProduct}
+        onClose={() => setDamageProduct(null)}
+        product={damageProduct}
+        currentUser={currentUser}
+        onSuccess={onDataChange}
         showToast={showToast}
       />
     </div>

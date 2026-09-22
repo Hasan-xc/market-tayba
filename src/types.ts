@@ -85,7 +85,7 @@ export interface StockAuditLog {
   productId: string;
   barcode: string;
   productName: string;
-  type: 'sale' | 'purchase' | 'manual_adjustment' | 'return' | 'scrap' | 'product_created' | 'product_deleted' | 'price_update' | 'transfer_in' | 'transfer_out';
+  type: 'sale' | 'purchase' | 'manual_adjustment' | 'return' | 'scrap' | 'product_created' | 'product_deleted' | 'price_update' | 'transfer_in' | 'transfer_out' | 'damage' | 'vendor_return';
   quantityDelta: number;
   previousQuantity: number;
   newQuantity: number;
@@ -235,6 +235,9 @@ export interface StoreSettings {
   hardwareScannerDelayThreshold?: number; // ms for barcode scanner
   autoPrintReceipt?: boolean; // طباعة تلقائية فور إنهاء البيع
   skipReceiptPreviewModal?: boolean; // تخطي نافذة المعاينة المنبثقة عند الطباعة التلقائية
+  autoBackupEnabled?: boolean; // النسخ التلقائي المجدول (تنزيل محلي + بريد ملخص نصي)
+  autoBackupFrequency?: 'daily' | 'weekly' | 'monthly';
+  autoBackupSections?: string[]; // all, sales, products, returns, stock_audit, suppliers, customers, valuation
 }
 
 export interface CashDrawerShift {

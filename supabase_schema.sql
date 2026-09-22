@@ -66,6 +66,12 @@ CREATE TABLE IF NOT EXISTS public.stock_audit_logs (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- توثيق قيم عمود type المسموحة في stock_audit_logs (نص حر بدون قيود CHECK):
+-- sale | purchase | manual_adjustment | return | scrap | product_created
+-- | product_deleted | price_update | transfer_in | transfer_out
+-- damage        = إتلاف / تالف خارج فاتورة بيع
+-- vendor_return = إرجاع للمصنع / المورد خارج فاتورة بيع (يشمل اسم المورد في reason)
+
 -- ================================================================
 -- الخطوة 2: إضافة جميع الأعمدة تلقائياً في حال وجود جداول قديمة
 -- هذا يمنع خطأ (ERROR: column does not exist) بنسبة 100%
@@ -155,6 +161,9 @@ ALTER TABLE public.store_settings ADD COLUMN IF NOT EXISTS security_pin TEXT;
 ALTER TABLE public.store_settings ADD COLUMN IF NOT EXISTS cashiers JSONB DEFAULT '[]'::jsonb;
 ALTER TABLE public.store_settings ADD COLUMN IF NOT EXISTS active_cashier TEXT;
 ALTER TABLE public.store_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE public.store_settings ADD COLUMN IF NOT EXISTS auto_backup_enabled BOOLEAN DEFAULT FALSE;
+ALTER TABLE public.store_settings ADD COLUMN IF NOT EXISTS auto_backup_frequency TEXT DEFAULT 'weekly';
+ALTER TABLE public.store_settings ADD COLUMN IF NOT EXISTS auto_backup_sections JSONB DEFAULT '[]'::jsonb;
 
 -- أعمدة جدول الموردين suppliers
 ALTER TABLE public.suppliers ADD COLUMN IF NOT EXISTS name TEXT;

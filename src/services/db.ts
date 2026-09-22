@@ -1219,6 +1219,112 @@ class CloudBackedDatabase {
     );
   }
 
+  // ==== إتلاف المخزون / الإرجاع للمصنع (Damage & Vendor Return) ====
+  recordDamageOrVendorReturn(params: {
+    productId: string;
+    type: 'damage' | 'vendor_return';
+    quantity: number;
+    branchId?: string;
+    damageReason?: string; // تالف / كسر / منتهي الصلاحية
+    notes?: string;
+    supplierId?: string;
+    performedBy?: string;
+  }): { success: boolean; message: string; log?: StockAuditLog } {
+    const { productId, type, damageReason, notes, supplierId } = params;
+
+    const prodIndex = this.inMemoryProducts.findIndex((p) => p.id === productId);
+    if (prodIndex === -1) {
+      return { success: false, message: 'الصنف غير موجود في النظام' };
+    }
+
+    const qty = Number(params.quantity);
+    if (isNaN(qty) || qty <= 0) {
+      return { success: false, message: 'يرجى إدخال كمية صالحة أكبر من الصفر' };
+    }
+
+    const targetBranchId = params.branchId || this.getActiveBranchId();
+    if (!targetBranchId || targetBranchId === 'all') {
+      return { success: false, message: 'يرجى تحديد الفرع الذي سيُخصم منه الرصيد' };
+    }
+
+    const prod = this.inMemoryProducts[prodIndex];
+    const bq = this.ensureBranchQuantities(prod);
+    const prevBranchQty = Number(bq[targetBranchId] ?? 0);
+    if (qty > prevBranchQty) {
+      return {
+        success: false,
+        message: `الكمية المطلوبة (${qty}) تتجاوز رصيد الفرع الحالي (${prevBranchQty})`,
+      };
+    }
+
+    const newBranchQty = Math.max(0, prevBranchQty - qty);
+    bq[targetBranchId] = newBranchQty;
+    prod.branchQuantities = bq;
+    prod.quantity = Object.values(bq).reduce((s, q) => s + (Number(q) || 0), 0);
+    prod.updatedAt = new Date().toISOString();
+
+    const branch = this.inMemoryBranches.find((b) => b.id === targetBranchId);
+    const branchName = branch ? branch.name : targetBranchId;
+    const actor = params.performedBy || this.inMemorySettings.activeCashier || 'مدير النظام';
+
+    let reason: string;
+    if (type === 'vendor_return') {
+      const supplier = supplierId ? this.getSupplierById(supplierId) : undefined;
+      reason = `إرجاع للمصنع/المورد: ${supplier ? supplier.name : 'غير محدد'} — من فرع ${branchName}`;
+    } else {
+      reason = `إتلاف/تالف (${damageReason || 'تالف'}) — من فرع ${branchName}`;
+    }
+    if (notes && notes.trim()) {
+      reason += ` — ${notes.trim()}`;
+    }
+
+    this.persist(STORAGE_KEYS.PRODUCTS, this.inMemoryProducts);
+
+    const log = this.addStockAuditLog({
+      productId: prod.id,
+      barcode: prod.barcode,
+      productName: prod.name,
+      type,
+      quantityDelta: -qty,
+      previousQuantity: prevBranchQty,
+      newQuantity: newBranchQty,
+      reason,
+      performedBy: actor,
+    });
+
+    this.notify();
+
+    this.triggerCloudSync(
+      async (supabase) => {
+        await supabase.syncProduct(prod);
+        await supabase.broadcastEvent('PRODUCT_UPSERT', prod);
+      },
+      { type: 'PRODUCT_UPSERT', data: prod }
+    );
+
+    // إرجاع للمورد: المستحق للمتجر لدى المورد = الكمية المرجعة × سعر شراء الصنف.
+    // saveSupplier تستبدل الكائن كاملاً وليست تراكمية، لذلك نقرأ الرصيد الحالي ونضيف الفرق قبل الحفظ.
+    if (type === 'vendor_return' && supplierId) {
+      const supplier = this.getSupplierById(supplierId);
+      if (supplier) {
+        const creditAmount = qty * (Number(prod.purchasePrice) || 0);
+        this.saveSupplier({
+          ...supplier,
+          balance: (Number(supplier.balance) || 0) + creditAmount,
+        });
+      }
+    }
+
+    return {
+      success: true,
+      message:
+        type === 'vendor_return'
+          ? 'تم إرجاع الكمية للمورد وتحديث المستحقات بنجاح'
+          : 'تم تسجيل عملية الإتلاف وخصم الرصيد بنجاح',
+      log,
+    };
+  }
+
   // ==== التحويلات المخزنية بين الفروع (Inter-Branch Stock Transfers) ====
   getStockTransfers(): StockTransfer[] {
     return this.inMemoryTransfers;
@@ -2824,8 +2930,24 @@ class CloudBackedDatabase {
     }
   }
 
-  exportSuppliersCSV(): string {
-    const suppliers = this.getSuppliers();
+  // فلترة اختيارية بنطاق تاريخي على createdAt (صيغة yyyy-mm-dd) — تُستخدم في كل دوال التصدير
+  private isWithinDateRange(isoDate: string, range?: { dateFrom?: string; dateTo?: string }): boolean {
+    if (!range || (!range.dateFrom && !range.dateTo)) return true;
+    const t = new Date(isoDate).getTime();
+    if (Number.isNaN(t)) return true;
+    if (range.dateFrom) {
+      const from = new Date(range.dateFrom + 'T00:00:00').getTime();
+      if (!Number.isNaN(from) && t < from) return false;
+    }
+    if (range.dateTo) {
+      const to = new Date(range.dateTo + 'T23:59:59.999').getTime();
+      if (!Number.isNaN(to) && t > to) return false;
+    }
+    return true;
+  }
+
+  exportSuppliersCSV(dateRange?: { dateFrom?: string; dateTo?: string }): string {
+    const suppliers = this.getSuppliers().filter((s) => this.isWithinDateRange(s.createdAt, dateRange));
     let csv = '\uFEFFاسم المورد,الشركة,رقم الهاتف,العنوان,الرصيد الدائن,ملاحظات\n';
     suppliers.forEach((s) => {
       csv += `"${s.name}","${s.company || '-'}","${s.phone || '-'}","${s.address || '-'}","${s.balance} ${this.inMemorySettings.currency}","${s.notes || ''}"\n`;
@@ -2833,8 +2955,8 @@ class CloudBackedDatabase {
     return csv;
   }
 
-  exportStockAuditCSV(): string {
-    const logs = this.getStockAuditLogs();
+  exportStockAuditCSV(dateRange?: { dateFrom?: string; dateTo?: string }): string {
+    const logs = this.getStockAuditLogs().filter((l) => this.isWithinDateRange(l.createdAt, dateRange));
     let csv = '\uFEFFالتاريخ والوقت,اسم الصنف,الباركود,نوع الحركة,الكمية المعدلة,الرصيد السابق,الرصيد الجديد,السبب,المسؤول\n';
     const typeMap: Record<string, string> = {
       sale: 'بيع فاتورة',
@@ -2842,6 +2964,8 @@ class CloudBackedDatabase {
       manual_adjustment: 'تعديل جردي',
       return: 'إرجاع مستودع',
       scrap: 'إتلاف وتالف',
+      damage: 'إتلاف / تالف',
+      vendor_return: 'إرجاع للمورد',
       product_created: 'إضافة صنف جديد',
       product_deleted: 'حذف صنف من المخزون',
       price_update: 'تعديل أسعار',
@@ -2854,8 +2978,8 @@ class CloudBackedDatabase {
     return csv;
   }
 
-  exportProductsCSV(): string {
-    const products = this.getProducts();
+  exportProductsCSV(dateRange?: { dateFrom?: string; dateTo?: string }): string {
+    const products = this.getProducts().filter((p) => this.isWithinDateRange(p.createdAt, dateRange));
     let csv = '\uFEFFالباركود,اسم الصنف,القسم,سعر الشراء,سعر البيع,الكمية,حد التنبيه,الوحدة\n';
     products.forEach((p) => {
       csv += `"${p.barcode}","${p.name}","${p.category}",${p.purchasePrice},${p.salePrice},${p.quantity},${p.minQuantityAlert},"${p.unit || 'حبة'}"\n`;
@@ -2863,8 +2987,8 @@ class CloudBackedDatabase {
     return csv;
   }
 
-  exportCustomersCSV(): string {
-    const customers = this.getCustomers();
+  exportCustomersCSV(dateRange?: { dateFrom?: string; dateTo?: string }): string {
+    const customers = this.getCustomers().filter((c) => this.isWithinDateRange(c.createdAt, dateRange));
     let csv = '\uFEFFالاسم,الهاتف,إجمالي الدين,تاريخ التسجيل,ملاحظات\n';
     customers.forEach((c) => {
       const dateStr = new Date(c.createdAt).toLocaleDateString('ar-SA');
@@ -2873,8 +2997,8 @@ class CloudBackedDatabase {
     return csv;
   }
 
-  exportInventoryValuationCSV(): string {
-    const products = this.getProducts();
+  exportInventoryValuationCSV(dateRange?: { dateFrom?: string; dateTo?: string }): string {
+    const products = this.getProducts().filter((p) => this.isWithinDateRange(p.createdAt, dateRange));
     let csv = '\uFEFFالباركود,اسم الصنف,القسم,الكمية,سعر التكلفة,إجمالي التكلفة,سعر البيع,إجمالي البيع,الربح المتوقع,هامش الربح %\n';
     products.forEach((p) => {
       const totalCost = p.quantity * p.purchasePrice;
@@ -2886,8 +3010,8 @@ class CloudBackedDatabase {
     return csv;
   }
 
-  exportSalesCSV(): string {
-    const sales = this.getSales();
+  exportSalesCSV(dateRange?: { dateFrom?: string; dateTo?: string }): string {
+    const sales = this.getSales().filter((s) => this.isWithinDateRange(s.createdAt, dateRange));
     let csv = '\uFEFFرقم الفاتورة,التاريخ والوقت,الكاشير,عدد الأصناف,المجموع الفرعي,الخصم,الصافي,الربح,طريقة الدفع,العميل\n';
     const payMap: Record<string, string> = {
       cash: 'نقدي',
@@ -2903,8 +3027,8 @@ class CloudBackedDatabase {
     return csv;
   }
 
-  exportReturnsCSV(): string {
-    const returns = this.getReturns();
+  exportReturnsCSV(dateRange?: { dateFrom?: string; dateTo?: string }): string {
+    const returns = this.getReturns().filter((r) => this.isWithinDateRange(r.createdAt, dateRange));
     let csv = '\uFEFFرقم الإرجاع,التاريخ والوقت,رقم الفاتورة الأصلية,اسم الصنف,الباركود,الكمية,سعر الوحدة,إجمالي المسترجع,السبب,الإجراء,الكاشير,ملاحظات\n';
     const reasonMap: Record<string, string> = {
       damaged: 'تالف',

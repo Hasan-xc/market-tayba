@@ -13,7 +13,9 @@ import {
   PackagePlus,
   Trash2,
   Tag,
-  Boxes
+  Boxes,
+  PackageMinus,
+  Truck
 } from 'lucide-react';
 import { StockAuditLog, StoreSettings } from '../types';
 import { dbService } from '../services/db';
@@ -148,6 +150,20 @@ export const StockAuditView = ({ settings, showToast }: Props) => {
           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-400 border border-purple-200 dark:border-purple-900/50">
             <AlertTriangle className="h-3.5 w-3.5" />
             تالف / إتلاف
+          </span>
+        );
+      case 'damage':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-400 border border-purple-200 dark:border-purple-900/50">
+            <PackageMinus className="h-3.5 w-3.5" />
+            إتلاف / تالف
+          </span>
+        );
+      case 'vendor_return':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-900/50">
+            <Truck className="h-3.5 w-3.5" />
+            إرجاع للمورد
           </span>
         );
       default:
@@ -345,6 +361,28 @@ export const StockAuditView = ({ settings, showToast }: Props) => {
             }`}
           >
             حذف أصناف
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedType('damage')}
+            className={`px-3 py-2 rounded-xl text-xs font-bold shrink-0 transition cursor-pointer ${
+              selectedType === 'damage'
+                ? 'bg-purple-600 text-white shadow-sm'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+            }`}
+          >
+            إتلاف
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedType('vendor_return')}
+            className={`px-3 py-2 rounded-xl text-xs font-bold shrink-0 transition cursor-pointer ${
+              selectedType === 'vendor_return'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+            }`}
+          >
+            إرجاع مورد
           </button>
         </div>
 

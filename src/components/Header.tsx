@@ -41,11 +41,31 @@ import {
   KeyRound,
   UserCheck,
   User,
-  ChevronDown
+  ChevronDown,
+  FileSpreadsheet,
+  CalendarDays,
+  Smartphone
 } from 'lucide-react';
 import { StoreSettings, UserAccount, Branch } from '../types';
 import { dbService } from '../services/db';
 import { SupabaseService } from '../services/supabase';
+import { BackupService } from '../services/backup';
+
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
+}
+
+const BACKUP_SECTIONS: { key: string; label: string }[] = [
+  { key: 'all', label: 'الكل' },
+  { key: 'sales', label: 'المبيعات' },
+  { key: 'products', label: 'المنتجات' },
+  { key: 'stock_audit', label: 'حركات المخزون' },
+  { key: 'suppliers', label: 'الموردين' },
+  { key: 'customers', label: 'العملاء' },
+  { key: 'returns', label: 'المرتجعات' },
+  { key: 'valuation', label: 'تقييم المخزون' },
+];
 
 interface Props {
   activeTab: string;
@@ -98,6 +118,16 @@ export const Header = ({
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const importFileInputRef = useRef<HTMLInputElement>(null);
+
+  // حالة قسم النسخ الاحتياطي وتصدير CSV
+  const [csvRange, setCsvRange] = useState<'today' | 'week' | 'month' | 'custom'>('today');
+  const [csvDateFrom, setCsvDateFrom] = useState('');
+  const [csvDateTo, setCsvDateTo] = useState('');
+  const [csvSections, setCsvSections] = useState<string[]>(['all']);
+  const [csvMsg, setCsvMsg] = useState('');
+
+  // حالة زر تثبيت التطبيق (PWA)
+  const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
 
   const branches = dbService.getBranches();
   const activeBranchId = dbService.getActiveBranchId();
@@ -157,6 +187,92 @@ export const Header = ({
     reader.readAsText(file);
     // تفريغ الحقل لاختياره مجدداً لاحقاً
     if (e.target) e.target.value = '';
+  };
+
+  // ==== النسخ الاحتياطي وتصدير البيانات (CSV) ====
+  const localDateStr = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  const toggleCsvSection = (key: string) => {
+    setCsvSections((prev) => {
+      if (key === 'all') return prev.includes('all') ? [] : ['all'];
+      const withoutAll = prev.filter((k) => k !== 'all');
+      return withoutAll.includes(key) ? withoutAll.filter((k) => k !== key) : [...withoutAll, key];
+    });
+  };
+
+  const toggleAutoBackupSection = (key: string) => {
+    const current = localSettings.autoBackupSections || ['all'];
+    let next: string[];
+    if (key === 'all') {
+      next = current.includes('all') ? [] : ['all'];
+    } else {
+      const withoutAll = current.filter((k) => k !== 'all');
+      next = withoutAll.includes(key) ? withoutAll.filter((k) => k !== key) : [...withoutAll, key];
+    }
+    setLocalSettings({ ...localSettings, autoBackupSections: next });
+  };
+
+  const handleDownloadCsvBackup = () => {
+    try {
+      if (csvSections.length === 0) {
+        setCsvMsg('يرجى اختيار قسم واحد على الأقل للتصدير');
+        return;
+      }
+      const today = new Date();
+      let dateFrom: string | undefined;
+      let dateTo: string | undefined = localDateStr(today);
+      if (csvRange === 'today') {
+        dateFrom = dateTo;
+      } else if (csvRange === 'week') {
+        const f = new Date(today);
+        f.setDate(f.getDate() - 6);
+        dateFrom = localDateStr(f);
+      } else if (csvRange === 'month') {
+        const f = new Date(today);
+        f.setMonth(f.getMonth() - 1);
+        dateFrom = localDateStr(f);
+      } else {
+        dateFrom = csvDateFrom || undefined;
+        dateTo = csvDateTo || undefined;
+      }
+      const count = BackupService.downloadFilteredCSVs(csvSections, dateFrom, dateTo);
+      setCsvMsg(`تم تنزيل ${count} ملف CSV بنجاح${dateFrom || dateTo ? ' للنطاق المحدد' : ''}.`);
+    } catch (err: any) {
+      setCsvMsg('فشل التصدير: ' + (err?.message || err));
+    }
+  };
+
+  // ==== زر تثبيت التطبيق على الجهاز (PWA Install) ====
+  useEffect(() => {
+    const standalone =
+      window.matchMedia('(display-mode: standalone)').matches ||
+      (window.navigator as any).standalone === true;
+    if (standalone) return;
+
+    const onBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setInstallPromptEvent(e as BeforeInstallPromptEvent);
+    };
+    const onAppInstalled = () => setInstallPromptEvent(null);
+
+    window.addEventListener('beforeinstallprompt', onBeforeInstallPrompt);
+    window.addEventListener('appinstalled', onAppInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', onBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', onAppInstalled);
+    };
+  }, []);
+
+  const handleInstallApp = async () => {
+    if (!installPromptEvent) return;
+    try {
+      await installPromptEvent.prompt();
+      await installPromptEvent.userChoice;
+    } catch (err) {
+      console.warn('Install prompt failed:', err);
+    }
+    setInstallPromptEvent(null);
   };
 
   useEffect(() => {
@@ -866,6 +982,21 @@ export const Header = ({
                   </button>
                 )}
 
+                {/* زر تثبيت التطبيق على الجهاز (PWA) — يظهر فقط عندما يدعم المتصفح التثبيت */}
+                {installPromptEvent && (
+                  <button
+                    type="button"
+                    onClick={handleInstallApp}
+                    className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition text-xs font-bold text-right cursor-pointer border border-emerald-200 dark:border-emerald-800/60"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Smartphone className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                      <span>تثبيت التطبيق على الجهاز</span>
+                    </div>
+                    <ChevronLeft className="h-3.5 w-3.5 text-emerald-400" />
+                  </button>
+                )}
+
                 {/* روابط إدارة الفروع والمستخدمين للمدير */}
                 {isAdmin && (
                   <>
@@ -1155,6 +1286,153 @@ export const Header = ({
                     onChange={(e) => setLocalSettings({ ...localSettings, backupEmail: e.target.value })}
                     className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2 font-mono text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-800 focus:border-emerald-600 focus:outline-none"
                   />
+                </div>
+              </div>
+
+              {/* النسخ الاحتياطي وتصدير البيانات (CSV) — يدوي + تلقائي مجدول */}
+              <div className="space-y-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <h4 className="font-bold text-slate-900 dark:text-white text-xs flex items-center gap-1.5">
+                  <FileSpreadsheet className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                  النسخ الاحتياطي وتصدير البيانات (CSV)
+                </h4>
+
+                {/* نسخ يدوي */}
+                <div className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 space-y-2">
+                  <span className="font-bold text-slate-800 dark:text-slate-200 block text-[11px] flex items-center gap-1.5">
+                    <Download className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" />
+                    نسخ يدوي — تنزيل ملفات CSV منفصلة
+                  </span>
+                  <div className={csvRange === 'custom' ? 'grid grid-cols-1 sm:grid-cols-3 gap-2' : 'grid grid-cols-1 sm:grid-cols-2 gap-2'}>
+                    <div>
+                      <label className="text-slate-600 dark:text-slate-400 block mb-1">نطاق التاريخ:</label>
+                      <select
+                        value={csvRange}
+                        onChange={(e) => setCsvRange(e.target.value as 'today' | 'week' | 'month' | 'custom')}
+                        className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 py-2 px-2.5 text-xs font-bold text-slate-900 dark:text-white focus:border-emerald-600 focus:outline-none"
+                      >
+                        <option value="today">اليوم</option>
+                        <option value="week">آخر أسبوع</option>
+                        <option value="month">آخر شهر</option>
+                        <option value="custom">مخصص</option>
+                      </select>
+                    </div>
+                    {csvRange === 'custom' && (
+                      <>
+                        <div>
+                          <label className="text-slate-600 dark:text-slate-400 block mb-1">من تاريخ:</label>
+                          <input
+                            type="date"
+                            value={csvDateFrom}
+                            onChange={(e) => setCsvDateFrom(e.target.value)}
+                            className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 py-2 px-2.5 font-mono text-xs text-slate-900 dark:text-white focus:border-emerald-600 focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-slate-600 dark:text-slate-400 block mb-1">إلى تاريخ:</label>
+                          <input
+                            type="date"
+                            value={csvDateTo}
+                            onChange={(e) => setCsvDateTo(e.target.value)}
+                            className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 py-2 px-2.5 font-mono text-xs text-slate-900 dark:text-white focus:border-emerald-600 focus:outline-none"
+                          />
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-slate-600 dark:text-slate-400 block mb-1">الأقسام المطلوب تصديرها:</label>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {BACKUP_SECTIONS.map((opt) => (
+                        <label key={opt.key} className="flex items-center gap-1.5 text-[11px] text-slate-700 dark:text-slate-300 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={csvSections.includes(opt.key)}
+                            onChange={() => toggleCsvSection(opt.key)}
+                            className="rounded text-emerald-600 focus:ring-emerald-500 h-3.5 w-3.5 shrink-0"
+                          />
+                          <span className="font-bold">{opt.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleDownloadCsvBackup}
+                    className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm shadow-emerald-950/20 transition cursor-pointer active:scale-95"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    <span>تنزيل نسخة الآن</span>
+                  </button>
+                  {csvMsg && (
+                    <p className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400">{csvMsg}</p>
+                  )}
+                </div>
+
+                {/* نسخ تلقائي مجدول */}
+                <div className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 space-y-2">
+                  <label className="flex items-center gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={localSettings.autoBackupEnabled ?? false}
+                      onChange={(e) => setLocalSettings({ ...localSettings, autoBackupEnabled: e.target.checked })}
+                      className="rounded text-emerald-600 focus:ring-emerald-500 h-4 w-4 shrink-0"
+                    />
+                    <div className="text-xs">
+                      <span className="font-bold text-slate-800 dark:text-slate-200 block">تفعيل النسخ التلقائي المجدول</span>
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400">فحص محلي عند فتح التطبيق — عند الاستحقاق تُنزَّل الملفات تلقائياً</span>
+                    </div>
+                  </label>
+
+                  {/* توضيح حدود الميزة (المسار أ بدون خادم) */}
+                  <p className="text-[11px] leading-snug text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/50 rounded-lg p-2 flex items-start gap-1.5">
+                    <CalendarDays className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    <span>الإرسال حاليًا تنزيل محلي + فتح البريد بملخص نصي دون مرفقات تلقائية — الإرفاق الفعلي يتطلب ربط خدمة بريد خارجية لاحقًا.</span>
+                  </p>
+
+                  {(localSettings.autoBackupEnabled ?? false) && (
+                    <>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-slate-600 dark:text-slate-400 block mb-1">تكرار النسخة:</label>
+                          <select
+                            value={localSettings.autoBackupFrequency || 'weekly'}
+                            onChange={(e) => setLocalSettings({ ...localSettings, autoBackupFrequency: e.target.value as 'daily' | 'weekly' | 'monthly' })}
+                            className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 py-2 px-2.5 text-xs font-bold text-slate-900 dark:text-white focus:border-emerald-600 focus:outline-none"
+                          >
+                            <option value="daily">يومي</option>
+                            <option value="weekly">أسبوعي</option>
+                            <option value="monthly">شهري</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-slate-600 dark:text-slate-400 block mb-1">البريد المستلم للملخص:</label>
+                          <input
+                            type="email"
+                            value={localSettings.backupEmail || ''}
+                            placeholder="market@example.com"
+                            onChange={(e) => setLocalSettings({ ...localSettings, backupEmail: e.target.value })}
+                            className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 py-2 px-2.5 font-mono text-xs text-slate-900 dark:text-white focus:border-emerald-600 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-slate-600 dark:text-slate-400 block mb-1">أقسام النسخة التلقائية:</label>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {BACKUP_SECTIONS.map((opt) => (
+                            <label key={`auto-${opt.key}`} className="flex items-center gap-1.5 text-[11px] text-slate-700 dark:text-slate-300 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={(localSettings.autoBackupSections || ['all']).includes(opt.key)}
+                                onChange={() => toggleAutoBackupSection(opt.key)}
+                                className="rounded text-emerald-600 focus:ring-emerald-500 h-3.5 w-3.5 shrink-0"
+                              />
+                              <span className="font-bold">{opt.label}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
 

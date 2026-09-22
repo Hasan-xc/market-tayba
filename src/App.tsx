@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { dbService } from './services/db';
 import { SupabaseService } from './services/supabase';
 import { signOutOnline } from './services/auth';
+import { BackupService } from './services/backup';
 import { Product, StoreSettings, SyncStatus, UserAccount } from './types';
 import { Header } from './components/Header';
 import { POS } from './components/POS';
@@ -161,6 +162,18 @@ export default function App() {
   const removeToast = (id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
+
+  // فحص النسخ الاحتياطي المجدول عند فتح التطبيق (المسار أ: تنزيل محلي + بريد ملخص نصي)
+  useEffect(() => {
+    try {
+      const res = BackupService.checkAndRunScheduledBackup(dbService.getSettings());
+      if (res && res.success) {
+        showToast(res.message, 'success');
+      }
+    } catch (e) {
+      console.warn('Scheduled backup check failed:', e);
+    }
+  }, []);
 
   // معالجة تسجيل الدخول والخروج وكلمة المرور
   const handleLoginSuccess = (user: UserAccount) => {

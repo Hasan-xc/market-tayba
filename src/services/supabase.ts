@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
-import { Product, SaleTransaction, ReturnRecord, StoreSettings, Customer, DebtTransaction, StockAuditLog } from '../types';
+import { Product, SaleTransaction, ReturnRecord, StoreSettings, Customer, DebtTransaction, StockAuditLog, Supplier } from '../types';
 import { dbService, SEED_PRODUCTS, DEFAULT_SETTINGS } from './db';
 
 export const DEFAULT_SUPABASE_URL = 'https://qvfunbtrgdhtqlmjwdzc.supabase.co';
@@ -598,6 +598,8 @@ export class SupabaseService {
           await this.syncCustomer(mut.data);
         } else if (mut.type === 'CUSTOMER_DELETE' && mut.data) {
           await this.deleteCustomer(mut.data.id);
+        } else if (mut.type === 'SUPPLIER_UPSERT' && mut.data) {
+          await this.syncSupplier(mut.data);
         } else if (mut.type === 'DEBT_TX_CREATE' && mut.data) {
           const ok = await this.syncDebtTransaction(mut.data);
           if (ok) dbService.markDebtTxAsSynced(mut.data.id);
@@ -939,6 +941,38 @@ export class SupabaseService {
       return op.success;
     } catch (e) {
       console.warn('Supabase customer sync exception:', e);
+      return false;
+    }
+  }
+
+  /**
+   * مزامنة مورد Supplier مع Supabase
+   */
+  static async syncSupplier(supplier: Supplier): Promise<boolean> {
+    if (!supplier) return false;
+    const client = this.getClient();
+    if (!client || !navigator.onLine) return false;
+
+    try {
+      const payload: Record<string, any> = {
+        id: supplier.id,
+        name: supplier.name,
+        company: supplier.company || null,
+        phone: supplier.phone || null,
+        address: supplier.address || null,
+        balance: Number(supplier.balance) || 0,
+        notes: supplier.notes || null,
+        created_at: supplier.createdAt || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      const op = await this.executeResilientOperation(
+        (p) => client.from('suppliers').upsert(p, { onConflict: 'id' }),
+        payload
+      );
+      return op.success;
+    } catch (e) {
+      console.warn('Supabase supplier sync exception:', e);
       return false;
     }
   }

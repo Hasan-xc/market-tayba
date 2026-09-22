@@ -194,7 +194,7 @@ export default function App() {
 
   // حماية التبويبات بحسب الصلاحيات: توجيه الكاشير إلى نقطة البيع إذا حاول فتح شاشات الإدارة العامة
   useEffect(() => {
-    const adminOnlyTabs = ['dashboard', 'reports', 'suppliers', 'audit'];
+    const adminOnlyTabs = ['dashboard', 'reports', 'suppliers', 'audit', 'audit-damage'];
     if (currentUser && currentUser.role !== 'admin' && adminOnlyTabs.includes(activeTab)) {
       setActiveTab('pos');
     }
@@ -358,6 +358,17 @@ export default function App() {
             <StockAuditView
               settings={settings}
               showToast={showToast}
+            />
+          </div>
+        )}
+
+        {/* تقرير الإتلاف وإرجاع المورد — نفس شاشة حركات المخزن مفلترة مسبقاً */}
+        {activeTab === 'audit-damage' && (
+          <div key={`audit-damage-${dataVersion}`}>
+            <StockAuditView
+              settings={settings}
+              showToast={showToast}
+              initialType="damage_group"
             />
           </div>
         )}

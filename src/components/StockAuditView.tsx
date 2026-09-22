@@ -23,12 +23,13 @@ import { dbService } from '../services/db';
 interface Props {
   settings: StoreSettings;
   showToast: (msg: string, type?: 'success' | 'error' | 'warn' | 'info') => void;
+  initialType?: string; // فتح الشاشة مفلترة مسبقاً ('damage_group' = إتلاف + إرجاع مورد)
 }
 
-export const StockAuditView = ({ settings, showToast }: Props) => {
+export const StockAuditView = ({ settings, showToast, initialType }: Props) => {
   const [logs, setLogs] = useState<StockAuditLog[]>(dbService.getStockAuditLogs());
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedType, setSelectedType] = useState<string>('all');
+  const [selectedType, setSelectedType] = useState<string>(initialType || 'all');
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
 
   // الاستماع التلقائي المباشر لأي حركة مخزون جديدة
@@ -46,8 +47,10 @@ export const StockAuditView = ({ settings, showToast }: Props) => {
 
   const filteredLogs = useMemo(() => {
     return logs.filter((log) => {
-      // فلترة بنوع الحركة
-      if (selectedType !== 'all' && log.type !== selectedType) {
+      // فلترة بنوع الحركة ('damage_group' يجمع الإتلاف وإرجاع المورد معاً)
+      if (selectedType === 'damage_group') {
+        if (log.type !== 'damage' && log.type !== 'vendor_return') return false;
+      } else if (selectedType !== 'all' && log.type !== selectedType) {
         return false;
       }
 
@@ -361,6 +364,17 @@ export const StockAuditView = ({ settings, showToast }: Props) => {
             }`}
           >
             حذف أصناف
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedType('damage_group')}
+            className={`px-3 py-2 rounded-xl text-xs font-bold shrink-0 transition cursor-pointer ${
+              selectedType === 'damage_group'
+                ? 'bg-gradient-to-l from-purple-600 to-indigo-600 text-white shadow-sm'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+            }`}
+          >
+            الإتلاف وإرجاع المورد
           </button>
           <button
             type="button"

@@ -92,6 +92,16 @@ export const Inventory = ({ settings, products, currentUser, onDataChange, showT
 
   const categories = ['all', ...Array.from(new Set(products.map((p) => p.category || 'عام')))];
 
+  // ملخص الإتلاف وإرجاع المورد للصنف المفتوح في مودال التعديل (من سجل حركات المخزون الموجود أصلاً)
+  const editingDamageSummary = useMemo(() => {
+    const pid = editingProduct?.id;
+    if (!isEditModalOpen || !pid) return null;
+    const logs = dbService.getStockAuditLogs(pid).filter((l) => l.type === 'damage' || l.type === 'vendor_return');
+    const damageQty = logs.filter((l) => l.type === 'damage').reduce((s, l) => s + Math.abs(Number(l.quantityDelta) || 0), 0);
+    const vendorQty = logs.filter((l) => l.type === 'vendor_return').reduce((s, l) => s + Math.abs(Number(l.quantityDelta) || 0), 0);
+    return { damageQty, vendorQty, last: logs[0] || null };
+  }, [isEditModalOpen, editingProduct?.id]);
+
   const generateBarcode = () => {
     // توليد باركود عشوائي فريد يبدأ بـ 628
     const randomSuffix = Math.floor(100000000 + Math.random() * 900000000);
@@ -661,6 +671,40 @@ export const Inventory = ({ settings, products, currentUser, onDataChange, showT
             </div>
 
             <form onSubmit={handleSaveProduct} className="p-3.5 sm:p-4 space-y-2.5 text-xs overflow-y-auto">
+              {/* ملخص الإتلاف وإرجاع المورد لهذا الصنف (يظهر عند التعديل فقط) */}
+              {editingProduct && editingDamageSummary && (
+                <div className="p-3 rounded-xl bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-900/60 space-y-2">
+                  <h4 className="font-bold text-purple-800 dark:text-purple-300 text-[11px] flex items-center gap-1.5">
+                    <PackageMinus className="h-3.5 w-3.5" />
+                    إتلاف
+                  </h4>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-purple-200 dark:border-purple-900/60">
+                      <span className="block text-[10px] text-slate-500 dark:text-slate-400">إجمالي المتلف (إتلاف)</span>
+                      <span className="font-black font-mono text-purple-700 dark:text-purple-300 text-sm">
+                        {editingDamageSummary.damageQty} {editingProduct.unit || 'حبة'}
+                      </span>
+                    </div>
+                    <div className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-900/60">
+                      <span className="block text-[10px] text-slate-500 dark:text-slate-400">إجمالي المرتجع للمورد</span>
+                      <span className="font-black font-mono text-indigo-700 dark:text-indigo-300 text-sm">
+                        {editingDamageSummary.vendorQty} {editingProduct.unit || 'حبة'}
+                      </span>
+                    </div>
+                  </div>
+                  {editingDamageSummary.last ? (
+                    <p className="text-[10px] text-slate-600 dark:text-slate-300 leading-snug bg-white dark:bg-slate-900 rounded-lg p-2 border border-slate-200 dark:border-slate-700">
+                      <span className="font-bold">آخر عملية:</span>{' '}
+                      {new Date(editingDamageSummary.last.createdAt).toLocaleString('ar-SA')} —{' '}
+                      {Math.abs(Number(editingDamageSummary.last.quantityDelta) || 0)} {editingProduct.unit || 'حبة'} —{' '}
+                      {editingDamageSummary.last.reason || 'بدون سبب مسجل'}
+                    </p>
+                  ) : (
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">لا توجد عمليات إتلاف أو إرجاع مسجلة لهذا الصنف.</p>
+                  )}
+                </div>
+              )}
+
               {/* Barcode & Scan & Auto-generate */}
               <div>
                 <div className="flex items-center justify-between mb-1">

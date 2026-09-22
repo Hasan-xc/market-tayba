@@ -44,7 +44,8 @@ import {
   ChevronDown,
   FileSpreadsheet,
   CalendarDays,
-  Smartphone
+  Smartphone,
+  PackageMinus
 } from 'lucide-react';
 import { StoreSettings, UserAccount, Branch } from '../types';
 import { dbService } from '../services/db';
@@ -868,6 +869,36 @@ export const Header = ({
                   </button>
                 );
               })}
+
+              {/* بند فرعي أسفل التقارير مباشرة: تقرير الإتلاف وإرجاع المورد (نفس شاشة حركات المخزن مفلترة مسبقاً) */}
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => handleNavClick('audit-damage')}
+                  className={`w-full flex items-center justify-between mr-5 px-3 py-1.5 rounded-xl transition-all duration-150 text-right group cursor-pointer ${
+                    activeTab === 'audit-damage'
+                      ? 'bg-gradient-to-l from-purple-600 to-indigo-600 text-white shadow-md shadow-purple-600/25 font-black'
+                      : 'text-slate-600 dark:text-slate-300 hover:bg-purple-50 dark:hover:bg-purple-950/40 hover:text-purple-700 dark:hover:text-purple-400 active:scale-[0.99]'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <div className={`flex h-6 w-6 items-center justify-center rounded-lg transition shrink-0 ${
+                      activeTab === 'audit-damage'
+                        ? 'bg-white/20 text-white'
+                        : 'bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400'
+                    }`}>
+                      <PackageMinus className="h-3.5 w-3.5" />
+                    </div>
+                    <div className="flex flex-col text-right">
+                      <span className="text-[11px] font-bold leading-tight">تقرير الإتلاف وإرجاع المورد</span>
+                      <span className={`text-[10px] font-normal leading-tight mt-0.5 ${activeTab === 'audit-damage' ? 'text-purple-100' : 'text-slate-400 dark:text-slate-500'}`}>
+                        حركات التالف والمرتجع للموردين
+                      </span>
+                    </div>
+                  </div>
+                  <ChevronLeft className={`h-3.5 w-3.5 transition ${activeTab === 'audit-damage' ? 'text-white' : 'text-purple-400 dark:text-purple-600'}`} />
+                </button>
+              )}
 
               {/* زر الإعدادات العامة للمتجر والسحابة أسفل التقارير في قائمة البرغر */}
               <button

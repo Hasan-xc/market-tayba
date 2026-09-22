@@ -136,6 +136,7 @@ export interface OfflineMutation {
     | 'RETURN_CREATE' 
     | 'CUSTOMER_UPSERT' 
     | 'CUSTOMER_DELETE' 
+    | 'SUPPLIER_UPSERT'
     | 'DEBT_TX_CREATE' 
     | 'SETTINGS_SAVE'
     | 'STOCK_AUDIT_CREATE';
@@ -2297,6 +2298,16 @@ class CloudBackedDatabase {
 
     this.persist(STORAGE_KEYS.SUPPLIERS, this.inMemorySuppliers);
     this.notify();
+
+    // مزامنة المورد (بما فيها تحديث الرصيد بعد الإرجاع للمورد) مع Supabase وبث الحدث
+    this.triggerCloudSync(
+      async (supabase) => {
+        await supabase.syncSupplier(saved);
+        await supabase.broadcastEvent('SUPPLIER_UPSERT', saved);
+      },
+      { type: 'SUPPLIER_UPSERT', data: saved }
+    );
+
     return saved;
   }
 

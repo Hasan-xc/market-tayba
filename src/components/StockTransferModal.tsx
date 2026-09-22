@@ -58,15 +58,17 @@ export const StockTransferModal: React.FC<Props> = ({
 
   // تهيئة الفروع الافتراضية
   useEffect(() => {
-    if (branches.length >= 2) {
-      const active = dbService.getActiveBranch();
-      const activeId = active?.id || branches[0].id;
-      setFromBranchId(activeId);
-      const other = branches.find((b) => b.id !== activeId);
-      if (other) setToBranchId(other.id);
-    } else if (branches.length === 1) {
-      setFromBranchId(branches[0].id);
-    }
+    if (branches.length === 0) return;
+    // الفرع النشط قد يكون وهمياً ('all' = جميع الفروع مجمعة للمدير) — ليس فرعاً حقيقياً
+    // يمكن التحويل منه، فالاستمرار به يجعل "المتوفر" 0 خطأً والقائمة تعرض أول خيار بصرياً.
+    // الحل: اعتماد أول فرع حقيقي من القائمة عند غياب فرع نشط فعلي.
+    const active = dbService.getActiveBranch();
+    const activeIsReal =
+      !!active && active.id !== 'all' && active.id !== 'multi' && branches.some((b) => b.id === active.id);
+    const defaultFrom = activeIsReal ? active.id : branches[0].id;
+    setFromBranchId(defaultFrom);
+    const other = branches.find((b) => b.id !== defaultFrom);
+    setToBranchId(other ? other.id : '');
   }, [branches, isOpen]);
 
   // المنتج المختار حالياً

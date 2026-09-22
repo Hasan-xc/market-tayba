@@ -58,7 +58,10 @@
 }
 
 .animate-fade-in {
-  animation: fadeIn 0.2s ease-out forwards;
+  /* بدون fill-mode: forwards — الاحتفاظ بـ transform نهائياً كان يجعل الجذر containing block
+     لكل عناصر fixed بداخله، فيتوسط المودال صفحة كاملة بدلاً من منتصف الشاشة.
+     الحالة النهائية للأنيميشن مطابقة للحالة الطبيعية فلا فرق بصري بإزالتها. */
+  animation: fadeIn 0.2s ease-out;
 }
 
 /* Custom Scrollbar */

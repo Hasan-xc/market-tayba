@@ -38,6 +38,7 @@ export const Reports = ({ settings, products, onDataChange, showToast }: Props) 
   const branches = dbService.getBranches();
   const allSales = dbService.getSales();
   const allReturns = dbService.getReturns();
+  const allAuditLogs = dbService.getStockAuditLogs();
 
   // تصفية حسب التاريخ والفرع
   const getFilteredData = () => {
@@ -83,10 +84,29 @@ export const Reports = ({ settings, products, onDataChange, showToast }: Props) 
       return matchRange && matchBranch;
     });
 
-    return { filteredSales, filteredReturns };
+    // خسائر التالف (الإتلاف) خلال نفس النطاق: الكمية المتلفة × سعر تكلفة الصنف.
+    // سجلات الإتلاف لا تحمل فرعاً منظماً — الفرع مدمج في نص السبب ("من فرع X") فتتم المطابقة عليه
+    const selectedBranchName = selectedBranch === 'all'
+      ? null
+      : (branches.find((b) => b.id === selectedBranch)?.name || null);
+    const filteredDamages = allAuditLogs.filter((l) => {
+      if (l.type !== 'damage') return false;
+      const t = new Date(l.createdAt).getTime();
+      if (!(t >= fromTime && t <= toTime)) return false;
+      if (selectedBranchName && !(l.reason || '').includes(`من فرع ${selectedBranchName}`)) return false;
+      return true;
+    });
+    const damageLoss = filteredDamages.reduce((sum, l) => {
+      const prod = products.find((p) => p.id === l.productId);
+      const cost = Number(prod?.purchasePrice) || 0;
+      return sum + Math.abs(Number(l.quantityDelta) || 0) * cost;
+    }, 0);
+    const damageQtyTotal = filteredDamages.reduce((s, l) => s + Math.abs(Number(l.quantityDelta) || 0), 0);
+
+    return { filteredSales, filteredReturns, filteredDamages, damageLoss, damageQtyTotal };
   };
 
-  const { filteredSales, filteredReturns } = getFilteredData();
+  const { filteredSales, filteredReturns, filteredDamages, damageLoss, damageQtyTotal } = getFilteredData();
 
   // الحسابات المالية
   const totalGrossSales = filteredSales.reduce((sum, s) => sum + s.subtotal, 0);
@@ -318,6 +338,22 @@ export const Reports = ({ settings, products, onDataChange, showToast }: Props) 
           </div>
           <div className="text-[11px] text-rose-600 dark:text-rose-500 font-mono">
             {settings.currency} ({filteredReturns.length} إرجاع)
+          </div>
+
+          {/* خسائر التالف (الإتلاف): خسارة إضافية غير مرصودة في المرتجعات */}
+          <div className="mt-2 rounded-xl border border-rose-200/70 dark:border-rose-900/50 bg-white/70 dark:bg-slate-900/60 p-2.5 space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-rose-800 dark:text-rose-300">🗑️ خسائر التالف (إتلاف)</span>
+              <span className="text-[10px] text-rose-500 dark:text-rose-400 font-mono">{filteredDamages.length} عملية</span>
+            </div>
+            <div className="flex items-baseline justify-between gap-1">
+              <span className="text-lg font-black font-mono text-rose-800 dark:text-rose-400">
+                -{damageLoss.toFixed(2)}
+              </span>
+              <span className="text-[10px] text-rose-600 dark:text-rose-500 font-mono">
+                {settings.currency} بسعر التكلفة ({damageQtyTotal} وحدة)
+              </span>
+            </div>
           </div>
         </div>
       </div>

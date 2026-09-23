@@ -334,3 +334,22 @@ export interface DailySummary {
   totalDebtCollected?: number;
 }
 
+// استيراد المنتجات بالجملة من ملف Excel/CSV
+export interface ParsedProductRow {
+  name: string;
+  barcode: string;
+  category: string;
+  purchasePrice: number;
+  salePrice: number;
+  quantity: number;
+  minQuantityAlert: number;
+  unit: string;
+  isWeighted: boolean;
+}
+
+export interface ProductsFileResult {
+  rows: ParsedProductRow[];
+  errors: { row: number; reason: string }[];
+  totalRows: number;
+}
+

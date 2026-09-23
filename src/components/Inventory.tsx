@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, type FormEvent } from 'react';
+import { useState, useEffect, useMemo, useRef, type FormEvent, type ChangeEvent } from 'react';
 import { 
   Package, 
   Plus, 
@@ -21,7 +21,9 @@ import {
   Warehouse,
   History,
   PackageMinus,
-  Scale
+  Scale,
+  Upload,
+  Download
 } from 'lucide-react';
 import { Product, StoreSettings, UserAccount, Branch } from '../types';
 import { dbService } from '../services/db';
@@ -30,6 +32,7 @@ import { BarcodeScannerModal } from './BarcodeScannerModal';
 import { StockTransferModal } from './StockTransferModal';
 import { DamageReturnModal } from './DamageReturnModal';
 import { matchProductSearch } from '../utils/search';
+import { parseProductsFile } from '../utils/products-import';
 
 interface Props {
   settings: StoreSettings;
@@ -92,6 +95,9 @@ export const Inventory = ({ settings, products, currentUser, onDataChange, showT
   const [targetBranchId, setTargetBranchId] = useState<string>('branch-main');
   // منتج بالوزن/بكمية حرة (بدون باركود مطبوع)
   const [isWeightedProduct, setIsWeightedProduct] = useState(false);
+  // استيراد المنتجات بالجملة من ملف Excel/CSV
+  const [isImporting, setIsImporting] = useState(false);
+  const importProductsFileRef = useRef<HTMLInputElement>(null);
 
   const categories = ['all', ...Array.from(new Set(products.map((p) => p.category || 'عام')))];
 
@@ -293,6 +299,96 @@ export const Inventory = ({ settings, products, currentUser, onDataChange, showT
     showToast('تم تصدير ملف المخزون بنجاح', 'success');
   };
 
+  // ==== استيراد المنتجات بالجملة من ملف Excel/CSV ====
+  const downloadImportTemplate = () => {
+    const csv =
+      '\uFEFFاسم المنتج,الباركود,القسم,سعر الشراء,سعر البيع,الكمية,حد التنبيه,الوحدة,منتج بالوزن\n' +
+      '"جبنة بيضاء",,"الألبان",80,120,5,3,كجم,نعم\n' +
+      '"شيبس رورو",6281234567890,"السناكس",1.5,2.5,50,5,كيس,لا\n' +
+      '"عصير برتقال",6281234567891,"العصائر",3,4.5,20,5,لتر,لا\n';
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'قالب_استيراد_المنتجات.csv';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
+    showToast('تم تنزيل قالب الاستيراد — املأه ثم ارفعه بنفس الزر', 'info');
+  };
+
+  const handleImportProductsFile = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (e.target) e.target.value = '';
+
+    setIsImporting(true);
+    try {
+      const result = await parseProductsFile(file);
+
+      if (result.rows.length === 0) {
+        showToast('لا توجد صفوف صالحة في الملف: ' + (result.errors[0]?.reason || 'تأكد من استخدام القالب'), 'error');
+        return;
+      }
+
+      const confirmed = window.confirm(
+        `تم قراءة الملف: ${result.rows.length} منتج صالح من أصل ${result.totalRows} صف.` +
+        (result.errors.length > 0 ? `\nسيُتخطى ${result.errors.length} صف بسبب أخطاء.` : '') +
+        `\n\nسيُضاف المنتجات إلى مخزن: ${selectedBranchFilter !== 'all' ? (branches.find((b) => b.id === selectedBranchFilter)?.name || 'الفرع الحالي') : (activeBranch.id !== 'all' ? activeBranch.name : 'الفرع الرئيسي')}\n\nهل تريد المتابعة؟`
+      );
+      if (!confirmed) return;
+
+      // الفرع المستهدف لنفس منطق الإضافة اليدوية (عزل الفروع)
+      const finalBranch = selectedBranchFilter !== 'all'
+        ? selectedBranchFilter
+        : (activeBranch.id !== 'all' ? activeBranch.id : 'branch-main');
+      const branchObj = branches.find((b) => b.id === finalBranch);
+      const finalBranchName = branchObj ? branchObj.name : 'الفرع الرئيسي';
+
+      let ok = 0;
+      const failed: string[] = [];
+      for (let i = 0; i < result.rows.length; i++) {
+        try {
+          const r = result.rows[i];
+          // الباركود الفارغ يُولَّد داخلياً (مطلوب في كل مسارات النظام)
+          const barcode = r.barcode || `628${Math.floor(100000000 + Math.random() * 900000000)}`;
+          dbService.saveProduct({
+            barcode,
+            name: r.name,
+            category: r.category,
+            purchasePrice: r.purchasePrice,
+            salePrice: r.salePrice,
+            quantity: r.quantity,
+            minQuantityAlert: r.minQuantityAlert,
+            unit: r.unit,
+            isWeighted: r.isWeighted || undefined,
+            branchId: finalBranch,
+            branchName: finalBranchName,
+            branchQuantities: { [finalBranch]: r.quantity },
+          });
+          ok++;
+        } catch (err: any) {
+          failed.push(`«${result.rows[i].name}»: ${err?.message || err}`);
+        }
+        // تنفس دوري حتى لا تتجمد الواجهة مع آلاف الصفوف
+        if (i % 25 === 0) await new Promise((res) => setTimeout(res, 0));
+      }
+
+      onDataChange();
+      showToast(`تم استيراد ${ok} منتج إلى (${finalBranchName}) بنجاح${failed.length > 0 ? ` — فشل ${failed.length}` : ''}`, failed.length > 0 ? 'warn' : 'success');
+      if (failed.length > 0) {
+        alert(`صفوف فشل استيرادها (${failed.length}):\n` + failed.slice(0, 20).join('\n') + (failed.length > 20 ? `\n... و${failed.length - 20} أخرى` : ''));
+      }
+      if (result.errors.length > 0) {
+        alert(`صفوف تُخطيت عند القراءة (${result.errors.length}):\n` + result.errors.slice(0, 20).map((er) => `صف ${er.row}: ${er.reason}`).join('\n'));
+      }
+    } catch (err: any) {
+      showToast('فشل قراءة الملف: ' + (err?.message || err), 'error');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   // تصفية المنتجات بالبحث الذكي والفئات والنواقص ومخازن الفروع
   const filteredProducts = products.filter((p) => {
     // عزل تام ومطلق للفرع المختار: إذا تم تحديد فرع، نعرض فقط الأصناف التابعة له
@@ -365,6 +461,37 @@ export const Inventory = ({ settings, products, currentUser, onDataChange, showT
           >
             <FileSpreadsheet className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
             <span>تصدير Excel/CSV</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => importProductsFileRef.current?.click()}
+            disabled={isImporting}
+            className={`flex items-center gap-1.5 rounded-xl border px-3.5 py-2.5 text-xs font-bold transition shadow-sm cursor-pointer ${
+              isImporting
+                ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed'
+                : 'border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-50 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300'
+            }`}
+            title="رفع ملف Excel أو CSV يحتوي 10 أو 50 أو 1000 منتج مرة واحدة"
+          >
+            <Upload className={`h-4 w-4 text-emerald-600 dark:text-emerald-400 ${isImporting ? 'animate-pulse' : ''}`} />
+            <span>{isImporting ? 'جاري الاستيراد...' : 'استيراد من ملف'}</span>
+          </button>
+          <input
+            ref={importProductsFileRef}
+            type="file"
+            accept=".csv,.xlsx,.xls"
+            onChange={handleImportProductsFile}
+            className="hidden"
+          />
+          <button
+            type="button"
+            onClick={downloadImportTemplate}
+            className="flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/80 px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-200 transition shadow-sm cursor-pointer"
+            title="تنزيل قالب CSV جاهز — عبّئه من Excel ثم ارفعه"
+          >
+            <Download className="h-4 w-4 text-sky-600 dark:text-sky-400" />
+            <span>قالب الاستيراد</span>
           </button>
         </div>
       </div>

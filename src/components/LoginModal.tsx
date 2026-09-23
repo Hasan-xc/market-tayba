@@ -70,7 +70,7 @@ export const LoginModal = ({ isOpen, onClose, onLoginSuccess, showCloseBtn = fal
 
         {/* Header */}
         <div className="text-center mt-2">
-<div className="mx-auto w-16 h-16 rounded-2xl overflow-hidden border border-emerald-500/20 shadow-inner mb-3 bg-white dark:bg-slate-800">
+<div className="mx-auto w-28 h-28 rounded-3xl overflow-hidden border border-emerald-500/20 shadow-inner mb-3 bg-white dark:bg-slate-800">
           <img
             src="./icons/icon-192.png"
             alt="لوجو المتجر"

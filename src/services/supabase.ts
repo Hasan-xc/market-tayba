@@ -39,11 +39,13 @@ async function attachStoredAuthSession(client: SupabaseClient, url: string): Pro
     const refreshToken = parsed?.refresh_token;
     if (!accessToken || !refreshToken) return;
     const fingerprint = `${accessToken}:${refreshToken}`;
+    // نُحفظ البصمة فقط بعد نجاح الالتحاق — لو فشل transient لن نمنع إعادة المحاولة
     if (lastAttachedSessionFingerprint === fingerprint) return;
-    lastAttachedSessionFingerprint = fingerprint; // لا إعادة محاولة لنفس التوكن (أو الفاشل)
     const { error } = await client.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
     if (error) {
       console.warn('[supabase] session attach ignored:', error.message);
+    } else {
+      lastAttachedSessionFingerprint = fingerprint; // نجاح → لا نعيد نفس التوكن مجدداً
     }
   } catch (e) {
     console.warn('[supabase] session attach ignored (fallback anon):', (e as any)?.message || e);
@@ -171,6 +173,12 @@ export class SupabaseService {
     const url = (settings.supabaseUrl || ENV_SUPABASE_URL || DEFAULT_SUPABASE_URL).trim();
     const client = this.getClient();
     if (client) await attachStoredAuthSession(client, url);
+  }
+
+  /** جلب عميل مع ضمان التحام الجلسة المخزّنة قبل أي استعلام (ضروري بعد تفعيل RLS) */
+  static async readyClient(): Promise<SupabaseClient | null> {
+    await this.attachAuthSession();
+    return this.getClient();
   }
 
   /** إعادة إنشاء عميل المزامنة من الصفر (بعد الخروج) */
@@ -629,10 +637,18 @@ export class SupabaseService {
       }
 
       const client = createClient(url, key, { auth: { persistSession: false } });
+      // ربط الجلسة المخزنة (إن وجدت) حتى يمر فحص الاتصال عبر RLS
+      attachStoredAuthSession(client, url);
+      await new Promise((r) => setTimeout(r, 300));
       const { error } = await client.from('products').select('id').limit(1);
 
       if (error) {
-        return { success: false, message: `فشل الاتصال: ${error.message}` };
+        // بعد تفعيل RLS يُرفض المجهول — هذا يعني أن الخادم حي ومستجيب لكن بجلسة غير مصادقة
+        const msg = String(error.message || error.details || error.code || '');
+        if (/permission denied|row-level security|while setting role|RLS|JWT|anon|42501|auth/i.test(msg)) {
+          return { success: true, message: 'تم الوصول لسحابة Supabase (المصادقة مطلوبة للبيانات)' };
+        }
+        return { success: false, message: `فشل الاتصال: ${msg}` };
       }
 
       return { success: true, message: 'تم الاتصال بقاعدة بيانات Supabase السحابية بنجاح!' };
@@ -716,7 +732,7 @@ export class SupabaseService {
     data?: Product;
     error?: string;
   }> {
-    const client = this.getClient();
+    const client = await this.readyClient();
     if (!client || !navigator.onLine) {
       return { success: false, action: 'rejected', error: 'العميل غير متصل بقاعدة البيانات أو أوفلاين' };
     }
@@ -899,7 +915,7 @@ export class SupabaseService {
    * حذف منتج من Supabase
    */
   static async deleteProduct(productId: string, barcode?: string): Promise<boolean> {
-    const client = this.getClient();
+    const client = await this.readyClient();
     if (!client || !navigator.onLine) return false;
 
     try {
@@ -920,7 +936,7 @@ export class SupabaseService {
    * مزامنة عميل Customer مع Supabase
    */
   static async syncCustomer(customer: Customer): Promise<boolean> {
-    const client = this.getClient();
+    const client = await this.readyClient();
     if (!client || !navigator.onLine) return false;
 
     try {
@@ -950,7 +966,7 @@ export class SupabaseService {
    */
   static async syncSupplier(supplier: Supplier): Promise<boolean> {
     if (!supplier) return false;
-    const client = this.getClient();
+    const client = await this.readyClient();
     if (!client || !navigator.onLine) return false;
 
     try {
@@ -981,7 +997,7 @@ export class SupabaseService {
    * حذف عميل من Supabase
    */
   static async deleteCustomer(customerId: string): Promise<boolean> {
-    const client = this.getClient();
+    const client = await this.readyClient();
     if (!client || !navigator.onLine) return false;
 
     try {
@@ -997,7 +1013,7 @@ export class SupabaseService {
    * مزامنة حركة دين Debt Transaction مع Supabase
    */
   static async syncDebtTransaction(tx: DebtTransaction): Promise<boolean> {
-    const client = this.getClient();
+    const client = await this.readyClient();
     if (!client || !navigator.onLine) return false;
 
     try {
@@ -1027,10 +1043,14 @@ export class SupabaseService {
   }
 
   /**
-   * مزامنة فاتورة بيع مع Supabase باستخدام upsert حصرياً
+   * مزامنة فاتورة بيع مع Supabase عبر دالة process_sale الذرية:
+   * الفاتورة + خصم المخزون في معاملة واحدة على الخادم مع Idempotency
+   * (إعادة محاولة من الطابور لا تُحدث فاتورة مكررة ولا خصماً مزدوجاً).
+   * إن لم تكن الدالة موجودة بعد (قاعدة بيانات غير مرقّاة) نتراجع للمسار
+   * القديم المنفصل بلا كسر، وطابور الأوفلاين يبقى دون تغيير.
    */
   static async syncSale(sale: SaleTransaction): Promise<boolean> {
-    const client = this.getClient();
+    const client = await this.readyClient();
     if (!client || !navigator.onLine) return false;
 
     try {
@@ -1038,7 +1058,7 @@ export class SupabaseService {
       const invoiceNumber = String(sale.invoiceNumber || `INV-${Date.now()}`);
       const primaryItem = sale.items?.[0];
 
-      // 1. تجهيز حمولة الفاتورة الشاملة
+      // 1. تجهيز حمولة الفاتورة الشاملة (مفتاح Idempotency = معرف الفاتورة نفسه)
       const invoicePayload: Record<string, any> = {
         id: saleId,
         invoice_number: invoiceNumber,
@@ -1062,24 +1082,41 @@ export class SupabaseService {
         profit: Number(sale.totalProfit) || 0,
         sold_at: sale.createdAt || new Date().toISOString(),
         created_at: sale.createdAt || new Date().toISOString(),
+        branch_id: sale.branchId || 'branch-main',
+        branch_name: sale.branchName || null,
+        status: sale.status || 'completed',
       };
 
-      // أعمدة الفرع والحالة — تُكتب إن وُجدت بالسحابة (تُشغّل بسكربت ALTER).
-      // إن لم تكن موجودة بعد: upsert يفشل بعمود مجهول → نجرّد الحقول ونعيد المحاولة.
+      // 2. المسار الذري المفضّل: استدعاء process_sale (معاملة واحدة + خصم + Idempotency)
+      const rpcRes = await client.rpc('process_sale', { sale_data: invoicePayload });
+      if (!rpcRes.error) {
+        // ربط استجابة الدالة — سواء created أو already_exists كلاهما نجاح
+        return true;
+      }
+
+      const rpcErrorMsg = String(rpcRes.error.message || rpcRes.error.details || rpcRes.error.code || '');
+      const rpcMissing =
+        rpcRes.error.code === 'PGRST202' ||
+        /process_sale|function.*does not exist|could not find the function/i.test(rpcErrorMsg);
+
+      // دالة غير موجودة بعد → مسار قديم متوافق مع قواعد غير مرقّاة (بلا ذرة لكن بلا كسر)
+      if (!rpcMissing) {
+        console.warn('Supabase sale sync via RPC failed:', rpcRes.error);
+        return false;
+      }
+
+      // 3. المسار المتوافق القديم (بلاد RLS/process_sale): upsert الفاتورة + خصم الأصناف
       const branchFields: Record<string, any> = {
         branch_id: sale.branchId || 'branch-main',
         branch_name: sale.branchName || null,
         status: sale.status || 'completed',
       };
       let payloadWithBranch = { ...invoicePayload, ...branchFields };
-
-      // إجراء Upsert للفاتورة في جدول sales
       let saleOp = await this.executeResilientOperation(
         (p) => client.from('sales').upsert(p, { onConflict: 'id' }),
         payloadWithBranch
       );
       if (!saleOp.success && saleOp.error && /branch_id|branch_name|status|does not exist|column/i.test(String(saleOp.error))) {
-        // الأعمدة غير موجودة بعد — جرّد الحقول الإضافية وأعد بلا كسر المزامنة
         payloadWithBranch = { ...invoicePayload };
         saleOp = await this.executeResilientOperation(
           (p) => client.from('sales').upsert(p, { onConflict: 'id' }),
@@ -1088,8 +1125,6 @@ export class SupabaseService {
       }
 
       if (!saleOp.success) {
-        // محاولة بديلة بالإدراج — يجب فحص نتيجتها: الإرجاع الأعمى لـ true كان
-        // يعلّم الفاتورة isSynced ويمنع إعادة المحاولة عبر طابور الأوفلاين
         const insertOp = await this.executeResilientOperation(
           (p) => client.from('sales').insert(p),
           payloadWithBranch
@@ -1100,7 +1135,7 @@ export class SupabaseService {
         }
       }
 
-      // 2. تحديث وخصم الكميات من جدول products في Supabase لكل صنف تم بيعه
+      // 4. خصم الكميات من products (المسار القديم فقط — الدالة الجديدة تخصم داخلياً)
       if (sale.items && sale.items.length > 0) {
         for (const item of sale.items) {
           if (item.barcode) {
@@ -1112,9 +1147,6 @@ export class SupabaseService {
 
             if (currentProduct) {
               const newQty = Math.max(0, Number(currentProduct.quantity || 0) - Number(item.quantity || 1));
-
-              // (Fix) مصدر حقيقة واحد: أعد موازنة الترميز داخل image_url ليطابق
-              // الكمية الجديدة — وإلا بقي الترميز العتيق يُبطل الخصم عند كل تطبيق
               const decoded = decodeBranchMetaFromImageUrl(currentProduct.image_url);
               const rowBranch = decoded.branchId || 'branch-main';
               let newBq = (decoded.branchQuantities && Object.keys(decoded.branchQuantities).length > 0)
@@ -1139,8 +1171,6 @@ export class SupabaseService {
                 .update({ quantity: newQty, image_url: newImageUrl, updated_at: new Date().toISOString() })
                 .eq('id', currentProduct.id);
             } else {
-              // (Fix 2) الصنف غير موجود بالسحابة: لا تخطِّ صامتاً — أنشئه بالكمية
-              // المحلية المخفَّدة فعلاً (المصدر الحقيقي للرصيد بعد البيع)
               const localProd = dbService.getProductById(item.productId);
               if (localProd) {
                 await this.syncProduct(localProd);
@@ -1161,7 +1191,7 @@ export class SupabaseService {
    * مزامنة مرتجع مع Supabase
    */
   static async syncReturn(ret: ReturnRecord): Promise<boolean> {
-    const client = this.getClient();
+    const client = await this.readyClient();
     if (!client || !navigator.onLine) return false;
 
     try {
@@ -1255,7 +1285,7 @@ export class SupabaseService {
    * مزامنة الإعدادات مع Supabase
    */
   static async syncSettings(settings: StoreSettings): Promise<boolean> {
-    const client = this.getClient();
+    const client = await this.readyClient();
     if (!client || !navigator.onLine) return false;
 
     try {
@@ -1288,7 +1318,7 @@ export class SupabaseService {
    * مزامنة سجل حركة وتدقيق المخزون (Stock Audit Log) مع Supabase
    */
   static async syncStockAuditLog(log: any): Promise<boolean> {
-    const client = this.getClient();
+    const client = await this.readyClient();
     if (!client || !navigator.onLine) return false;
 
     try {
@@ -1320,7 +1350,7 @@ export class SupabaseService {
    * مزامنة سند تحويل مخزني بين الفروع مع Supabase
    */
   static async syncStockTransfer(transfer: any): Promise<boolean> {
-    const client = this.getClient();
+    const client = await this.readyClient();
     if (!client || !navigator.onLine) return false;
 
     try {
@@ -1368,7 +1398,7 @@ export class SupabaseService {
    * (الجزء الذي يكمل دالة إعادة المزامنة الكاملة — الموردين push-only أصلاً)
    */
   static async pullSuppliersFromSupabase(): Promise<number> {
-    const client = this.getClient();
+    const client = await this.readyClient();
     if (!client || !navigator.onLine) return 0;
     try {
       const { data, error } = await client.from('suppliers').select('*');
@@ -1394,7 +1424,7 @@ export class SupabaseService {
    * سحب سندات التحويل المخزني من Supabase (لا توجد دالة سحب لها في pullFromSupabase)
    */
   static async pullStockTransfersFromSupabase(): Promise<number> {
-    const client = this.getClient();
+    const client = await this.readyClient();
     if (!client || !navigator.onLine) return 0;
     try {
       const { data, error } = await client.from('stock_transfers').select('*');
@@ -1433,7 +1463,7 @@ export class SupabaseService {
     syncedDebtCount: number;
     message: string;
   }> {
-    const client = this.getClient();
+    const client = await this.readyClient();
     if (!client) {
       return {
         success: false,
@@ -1551,7 +1581,7 @@ export class SupabaseService {
     auditCount: number;
     message: string;
   }> {
-    const client = this.getClient();
+    const client = await this.readyClient();
     if (!client) {
       return {
         success: false,
@@ -2007,19 +2037,133 @@ create index if not exists idx_customers_phone on public.customers (phone);
 create index if not exists idx_debt_tx_customer on public.debt_transactions (customer_id);
 create index if not exists idx_sales_created_at on public.sales (created_at desc);
 
--- سياسات الأمان والحماية (Row Level Security)
+-- جدول المستخدمين الداخليين (مطلوب لسياسات RLS المتدرجة)
+create table if not exists public.app_users (
+  id text primary key,
+  username text not null,
+  email text,
+  display_name text,
+  role text not null default 'cashier',
+  branch_id text,
+  auth_uid uuid,
+  created_at timestamp with time zone default now(),
+  updated_at timestamp with time zone default now()
+);
+create unique index if not exists uq_app_users_username on public.app_users (lower(username));
+create unique index if not exists uq_app_users_auth_uid on public.app_users (auth_uid) where auth_uid is not null;
+
+-- دوال مساعدة للدور والفرع
+create or replace function public.is_admin()
+returns boolean language sql stable security invoker as $$
+  select exists (select 1 from public.app_users u where u.auth_uid = auth.uid() and lower(coalesce(u.role, '')) = 'admin');
+$$;
+create or replace function public.current_username()
+returns text language sql stable security invoker as $$
+  select nullif(lower(split_part(coalesce(auth.jwt() ->> 'email', ''), '@', 1)), '');
+$$;
+create or replace function public.current_user_branch()
+returns text language sql stable security invoker as $$
+  select (select u.branch_id from public.app_users u where u.auth_uid = auth.uid() limit 1);
+$$;
+
+-- سياسات الأمان والحماية (تحتاج مصادقة — لا وصول مجهول)
 alter table public.products enable row level security;
 alter table public.customers enable row level security;
 alter table public.debt_transactions enable row level security;
 alter table public.sales enable row level security;
 alter table public.returns enable row level security;
 alter table public.store_settings enable row level security;
+alter table public.suppliers enable row level security;
+alter table public.stock_audit_logs enable row level security;
+alter table public.app_users enable row level security;
 
-create policy "Allow full access on products" on public.products for all using (true) with check (true);
-create policy "Allow full access on customers" on public.customers for all using (true) with check (true);
-create policy "Allow full access on debt_transactions" on public.debt_transactions for all using (true) with check (true);
-create policy "Allow full access on sales" on public.sales for all using (true) with check (true);
-create policy "Allow full access on returns" on public.returns for all using (true) with check (true);
-create policy "Allow full access on store_settings" on public.store_settings for all using (true) with check (true);`;
+drop policy if exists "Public Access Products" on public.products;
+drop policy if exists "Public Access Sales" on public.sales;
+drop policy if exists "Public Access Returns" on public.returns;
+drop policy if exists "Public Access Customers" on public.customers;
+drop policy if exists "Public Access Debt" on public.debt_transactions;
+drop policy if exists "Public Access Settings" on public.store_settings;
+drop policy if exists "Public Access Suppliers" on public.suppliers;
+drop policy if exists "Public Access Stock Audit" on public.stock_audit_logs;
+drop policy if exists "Allow full access on products" on public.products;
+drop policy if exists "Allow full access on customers" on public.customers;
+drop policy if exists "Allow full access on debt_transactions" on public.debt_transactions;
+drop policy if exists "Allow full access on sales" on public.sales;
+drop policy if exists "Allow full access on returns" on public.returns;
+drop policy if exists "Allow full access on store_settings" on public.store_settings;
+
+create policy "app_users read own" on public.app_users for select
+  using (auth.uid() is not null and (public.is_admin() or auth_uid = auth.uid() or username = public.current_username()));
+create policy "app_users insert own" on public.app_users for insert
+  with check (auth.uid() is not null and (public.is_admin() or auth_uid = auth.uid()));
+create policy "app_users update own" on public.app_users for update
+  using (auth.uid() is not null and (public.is_admin() or auth_uid = auth.uid() or (auth_uid is null and username = public.current_username())))
+  with check (auth.uid() is not null and (public.is_admin() or auth_uid = auth.uid() or username = public.current_username()));
+create policy "app_users delete admin" on public.app_users for delete
+  using (public.is_admin());
+
+create policy "products authed access" on public.products for all
+  using (auth.uid() is not null and (public.is_admin() or branch_id is null or branch_id = public.current_user_branch() or branch_id in ('multi','all')))
+  with check (auth.uid() is not null and (public.is_admin() or branch_id is null or branch_id = public.current_user_branch() or branch_id in ('multi','all')));
+create policy "sales authed access" on public.sales for all
+  using (auth.uid() is not null and (public.is_admin() or branch_id is null or branch_id = public.current_user_branch()))
+  with check (auth.uid() is not null and (public.is_admin() or branch_id is null or branch_id = public.current_user_branch()));
+create policy "returns authed access" on public.returns for all
+  using (auth.uid() is not null and (public.is_admin() or branch_id is null or branch_id = public.current_user_branch()))
+  with check (auth.uid() is not null and (public.is_admin() or branch_id is null or branch_id = public.current_user_branch()));
+create policy "debt authed access" on public.debt_transactions for all
+  using (auth.uid() is not null and (public.is_admin() or branch_id is null or branch_id = public.current_user_branch()))
+  with check (auth.uid() is not null and (public.is_admin() or branch_id is null or branch_id = public.current_user_branch()));
+create policy "customers authed access" on public.customers for all
+  using (auth.uid() is not null) with check (auth.uid() is not null);
+create policy "audit authed access" on public.stock_audit_logs for all
+  using (auth.uid() is not null) with check (auth.uid() is not null);
+create policy "settings authed read" on public.store_settings for select
+  using (auth.uid() is not null);
+create policy "settings admin write" on public.store_settings for all
+  using (public.is_admin()) with check (public.is_admin());
+create policy "suppliers authed read" on public.suppliers for select
+  using (auth.uid() is not null);
+create policy "suppliers admin write" on public.suppliers for all
+  using (public.is_admin()) with check (public.is_admin());
+
+-- دالة البيع الذرية: الفاتورة + خصم المخزون في معاملة واحدة مع Idempotency
+create or replace function public.process_sale(sale_data jsonb)
+returns jsonb language plpgsql security invoker as $$
+declare
+  sale_id text;
+  sale_branch text;
+  existing_sale jsonb;
+  item jsonb;
+begin
+  if auth.uid() is null then
+    raise exception 'authentication required';
+  end if;
+  sale_id := coalesce(nullif(sale_data ->> 'id', ''), 'sale-' || to_char(now(), 'YYYYMMDDHH24MISSUS') || '-' || lower(substr(gen_random_uuid()::text, 1, 8)));
+  sale_branch := coalesce(nullif(sale_data ->> 'branch_id', ''), 'branch-main');
+  select to_jsonb(s) into existing_sale from public.sales s where s.id = sale_id;
+  if existing_sale is not null then
+    return jsonb_build_object('id', sale_id, 'status', 'already_exists', 'sale', existing_sale);
+  end if;
+  insert into public.sales (id, invoice_number, items, subtotal, discount_total, net_total, total_profit, payment_method, cash_tendered, change_due, cashier_name, customer_id, customer_name, barcode, product_name, quantity_sold, purchase_price, sale_price, total_amount, profit, sold_at, created_at, branch_id, branch_name, status)
+  values (sale_id, coalesce(sale_data ->> 'invoice_number', 'INV-' || sale_id), coalesce(sale_data -> 'items', '[]'::jsonb), coalesce((sale_data ->> 'subtotal')::numeric, 0), coalesce((sale_data ->> 'discount_total')::numeric, 0), coalesce((sale_data ->> 'net_total')::numeric, 0), coalesce((sale_data ->> 'total_profit')::numeric, 0), coalesce(sale_data ->> 'payment_method', 'cash'), coalesce((sale_data ->> 'cash_tendered')::numeric, 0), coalesce((sale_data ->> 'change_due')::numeric, 0), coalesce(sale_data ->> 'cashier_name', 'الكاشير'), nullif(sale_data ->> 'customer_id', ''), nullif(sale_data ->> 'customer_name', ''), nullif(sale_data ->> 'barcode', ''), nullif(sale_data ->> 'product_name', ''), coalesce((sale_data ->> 'quantity_sold')::numeric, 1), coalesce((sale_data ->> 'purchase_price')::numeric, 0), coalesce((sale_data ->> 'sale_price')::numeric, 0), coalesce((sale_data ->> 'total_amount')::numeric, 0), coalesce((sale_data ->> 'profit')::numeric, 0), coalesce((sale_data ->> 'sold_at')::timestamptz, now()), coalesce((sale_data ->> 'created_at')::timestamptz, now()), sale_branch, sale_data ->> 'branch_name', coalesce(sale_data ->> 'status', 'completed'))
+  on conflict (id) do nothing;
+  for item in select * from jsonb_array_elements(coalesce(sale_data -> 'items', '[]'::jsonb)) loop
+    if (item ->> 'product_id') is not null or (item ->> 'barcode') is not null then
+      update public.products
+        set quantity = greatest(0, coalesce(quantity, 0) - coalesce((item ->> 'quantity')::numeric, 1)),
+            branch_quantities = case
+              when branch_quantities is not null and branch_id is not null
+                then jsonb_set(branch_quantities, array[sale_branch], to_jsonb(greatest(0, coalesce((branch_quantities -> sale_branch)::numeric, 0) - coalesce((item ->> 'quantity')::numeric, 1))))
+              else branch_quantities end,
+            updated_at = now()
+        where id = (item ->> 'product_id') or (barcode = (item ->> 'barcode') and (item ->> 'product_id') is null);
+    end if;
+  end loop;
+  return jsonb_build_object('id', sale_id, 'status', 'created', 'sale', (select to_jsonb(s) from public.sales s where s.id = sale_id));
+end;
+$$;
+grant execute on function public.process_sale(jsonb) to service_role, authenticated;
+revoke execute on function public.process_sale(jsonb) from anon, public;`;
   }
 }

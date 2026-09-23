@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { Lock, Delete, ArrowRight, Shield } from 'lucide-react';
 import { StoreSettings } from '../types';
-import { hashPin, isHashedValue } from '../utils/crypto';
+import { verifySecret } from '../utils/crypto';
 
 interface Props {
   isOpen: boolean;
@@ -30,11 +30,11 @@ export const PinModal = ({ isOpen, onUnlock, settings, showToast }: Props) => {
       isCheckingRef.current = true;
       void (async () => {
         const stored = settings.securityPin || '';
-        // القيمة المخزنة بعد الترحيل هاش (64 hex). نُبقي مساراً انتقالياً للنص الصريح
-        // يغطي: القيمة الفارغة (افتراضي 1234) ولحظة ما قبل انتهاء الترحيل.
+        // القيمة المخزنة هاش (مملّح sha256:<ملح>:<هاش> أو 64 hex قديم) — نُبقي مساراً
+        // انتقالياً للنص الصريح يغطي القيمة الفارغة (افتراضي 1234) ولحظة ما قبل الترحيل.
         let isMatch: boolean;
-        if (isHashedValue(stored)) {
-          isMatch = (await hashPin(nextPin)) === stored;
+        if (stored && /^(sha256:[0-9a-f]{16}:[0-9a-f]{64}|[0-9a-f]{64})$/.test(stored)) {
+          isMatch = await verifySecret(nextPin, stored, 'pin');
         } else {
           isMatch = nextPin === (stored || '1234');
         }

@@ -48,6 +48,8 @@ async function bestEffortMapAuthUid(username: string, uid: string): Promise<void
   try {
     const cleanUsername = String(username || '').trim().toLowerCase();
     const email = syntheticEmail(cleanUsername);
+    // بعد تفعيل RLS يجب أن تكون الجلسة المخزنة مرفقة بالقفل قبل أي قراءة/كتابة لـ app_users
+    await SupabaseService.attachAuthSession();
     const client = SupabaseService.getClient();
     if (client && (typeof navigator === 'undefined' || navigator.onLine)) {
       // 1) تحديث مباشر بالاسم (صفوف حقيقية موجودة مسبقاً من S2)

@@ -70,9 +70,17 @@ export const LoginModal = ({ isOpen, onClose, onLoginSuccess, showCloseBtn = fal
 
         {/* Header */}
         <div className="text-center mt-2">
-          <div className="mx-auto w-14 h-14 rounded-2xl bg-emerald-600/15 dark:bg-emerald-600/25 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shadow-inner mb-3">
-            <Store className="w-7 h-7" />
-          </div>
+<div className="mx-auto w-16 h-16 rounded-2xl overflow-hidden border border-emerald-500/20 shadow-inner mb-3 bg-white dark:bg-slate-800">
+          <img
+            src="./icons/icon-192.png"
+            alt="لوجو المتجر"
+            className="w-full h-full object-cover"
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).style.display = 'none';
+              (e.currentTarget.parentElement as HTMLElement).classList.add('bg-emerald-600/15', 'dark:bg-emerald-600/25');
+            }}
+          />
+        </div>
           <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
             {settings.storeName || 'ماركت طيبه'}
           </h2>

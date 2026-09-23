@@ -750,8 +750,16 @@ export const Header = ({
             {/* Drawer Header */}
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/80">
               <div className="flex items-center gap-2.5">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600/15 dark:bg-emerald-600/25 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shadow-xs">
-                  <Store className="h-5 w-5" />
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl overflow-hidden border border-emerald-500/20 shadow-xs bg-white dark:bg-slate-800 shrink-0">
+                  <img
+                    src="./icons/icon-192.png"
+                    alt="لوجو المتجر"
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).style.display = 'none';
+                      (e.currentTarget.parentElement as HTMLElement).classList.add('bg-emerald-600/15', 'dark:bg-emerald-600/25');
+                    }}
+                  />
                 </div>
                 <div>
                   <h3 className="text-sm font-black text-slate-900 dark:text-white tracking-tight">

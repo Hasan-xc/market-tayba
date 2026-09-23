@@ -28,7 +28,8 @@ import {
   Eye,
   ChevronDown,
   Building2,
-  Scale
+  Scale,
+  Pencil
 } from 'lucide-react';
 import { Product, CartItem, SaleTransaction, StoreSettings, ParkedCart, Customer, UserAccount } from '../types';
 import { dbService } from '../services/db';
@@ -53,6 +54,9 @@ export const POS = ({ settings, products, currentUser, onDataChange, showToast }
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   // منتج الوزن/الكمية الحرة المنتظر إدخال وزنه أو مبلغه قبل إضافته للسلة
   const [weightModalProduct, setWeightModalProduct] = useState<Product | null>(null);
+  // تعديل سعر صنف واحد داخل السلة (زيادة/نقصان على سعر البيع الأساسي)
+  const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
+  const [editingPriceVal, setEditingPriceVal] = useState('');
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'credit'>('cash');
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
@@ -199,6 +203,32 @@ export const POS = ({ settings, products, currentUser, onDataChange, showToast }
   };
 
   // تعديل كمية الصنف بالسلة
+  // تعديل سعر صنف واحد فقط داخل السلة (بدل الخصم العام على مجموع السلة)
+  const updateItemPrice = (productId: string, newUnitPrice: number) => {
+    setCart((prevCart) =>
+      prevCart.map((item) => {
+        if (item.product.id === productId) {
+          const unitPrice = Math.max(0, newUnitPrice);
+          return { ...item, unitPrice, total: Math.max(0, (unitPrice - item.discount) * item.quantity) };
+        }
+        return item;
+      })
+    );
+  };
+
+  const startPriceEdit = (item: CartItem) => {
+    setEditingPriceId(item.product.id);
+    setEditingPriceVal(String(item.unitPrice));
+  };
+
+  const commitPriceEdit = (item: CartItem) => {
+    const val = parseFloat(editingPriceVal);
+    if (!isNaN(val) && val >= 0) {
+      updateItemPrice(item.product.id, val);
+    }
+    setEditingPriceId(null);
+  };
+
   const updateItemQuantity = (productId: string, newQty: number) => {
     if (newQty <= 0) {
       removeFromCart(productId);
@@ -636,9 +666,47 @@ export const POS = ({ settings, products, currentUser, onDataChange, showToast }
                 <div key={`cart-item-${item.product.id || item.product.barcode || idx}-${idx}`} className="pt-1.5 first:pt-0 flex items-center justify-between gap-2 text-xs">
                   <div className="flex-1 min-w-0 pr-1">
                     <div className="font-bold text-slate-900 dark:text-white truncate">{item.product.name}</div>
-                    <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
-                      {item.unitPrice.toFixed(2)} × {item.quantity} = <b className="text-slate-800 dark:text-emerald-400 font-bold">{item.total.toFixed(2)} {settings.currency}</b>
-                    </div>
+                    {editingPriceId === item.product.id ? (
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <input
+                          type="number"
+                          step="0.25"
+                          min="0"
+                          autoFocus
+                          value={editingPriceVal}
+                          onChange={(e) => setEditingPriceVal(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') commitPriceEdit(item);
+                            if (e.key === 'Escape') setEditingPriceId(null);
+                          }}
+                          className="w-16 rounded-md border border-amber-400 bg-amber-50 dark:bg-amber-950/40 py-0.5 px-1 text-center font-mono text-[10px] font-bold text-slate-900 dark:text-white focus:outline-none"
+                        />
+                        <span className="text-[9px] text-slate-400">{settings.currency}</span>
+                        <button
+                          type="button"
+                          onClick={() => commitPriceEdit(item)}
+                          className="p-0.5 text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 cursor-pointer"
+                          title="تأكيد السعر"
+                        >
+                          <Check className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => startPriceEdit(item)}
+                        className="text-[10px] text-slate-500 dark:text-slate-400 font-mono flex items-center gap-1 hover:text-amber-600 dark:hover:text-amber-400 transition cursor-pointer"
+                        title="اضغط لتعديل سعر هذا الصنف (زيادة أو نقصان)"
+                      >
+                        <Pencil className="h-2.5 w-2.5 text-slate-400 shrink-0" />
+                        <span>
+                          {item.unitPrice.toFixed(2)} × {item.quantity} ={' '}
+                          <b className={item.unitPrice !== item.product.salePrice ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-slate-800 dark:text-emerald-400 font-bold'}>
+                            {item.total.toFixed(2)} {settings.currency}
+                          </b>
+                        </span>
+                      </button>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5 shrink-0">
@@ -923,6 +991,75 @@ export const POS = ({ settings, products, currentUser, onDataChange, showToast }
             </div>
 
             <div className="p-3.5 sm:p-4 space-y-3 overflow-y-auto text-xs">
+              {/* مراجعة السلة: كل ما يشتريه الزبون مع إمكانية تعديل سعر أي صنف */}
+              {cart.length > 0 && (
+                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-800/50 p-2.5">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-[11px] font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                      <ShoppingBag className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                      معاينة السلة ({totalItemsCount} قطعة):
+                    </label>
+                    <span className="text-[10px] text-slate-400 dark:text-slate-500 flex items-center gap-1">
+                      <Pencil className="h-2.5 w-2.5" />
+                      اضغط السعر لتعديله
+                    </span>
+                  </div>
+                  <div className="max-h-40 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-700/60 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/60">
+                    {cart.map((item, idx) => (
+                      <div key={`review-item-${item.product.id || idx}-${idx}`} className="px-2 py-1.5 flex items-center justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="font-bold text-slate-900 dark:text-white truncate text-[11px]">
+                            {item.product.name}
+                            <span className="text-[9px] text-slate-400 font-mono mr-1">× {item.quantity}</span>
+                          </div>
+                          {editingPriceId === item.product.id ? (
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <input
+                                type="number"
+                                step="0.25"
+                                min="0"
+                                autoFocus
+                                value={editingPriceVal}
+                                onChange={(e) => setEditingPriceVal(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') commitPriceEdit(item);
+                                  if (e.key === 'Escape') setEditingPriceId(null);
+                                }}
+                                className="w-16 rounded-md border border-amber-400 bg-amber-50 dark:bg-amber-950/40 py-0.5 px-1 text-center font-mono text-[10px] font-bold text-slate-900 dark:text-white focus:outline-none"
+                              />
+                              <span className="text-[9px] text-slate-400">{settings.currency}</span>
+                              <button
+                                type="button"
+                                onClick={() => commitPriceEdit(item)}
+                                className="p-0.5 text-emerald-600 dark:text-emerald-400 cursor-pointer"
+                                title="تأكيد السعر"
+                              >
+                                <Check className="h-3 w-3" />
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => startPriceEdit(item)}
+                              className="text-[10px] text-slate-500 dark:text-slate-400 font-mono flex items-center gap-1 hover:text-amber-600 dark:hover:text-amber-400 transition cursor-pointer"
+                              title="اضغط لتعديل سعر هذا الصنف"
+                            >
+                              <Pencil className="h-2.5 w-2.5 text-slate-400 shrink-0" />
+                              <span>
+                                {item.unitPrice.toFixed(2)} ={' '}
+                                <b className={item.unitPrice !== item.product.salePrice ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-slate-800 dark:text-emerald-400 font-bold'}>
+                                  {item.total.toFixed(2)} {settings.currency}
+                                </b>
+                              </span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* خيارات طرق الدفع (نقدي / شبكة / آجل ديون) */}
               <div>
                 <label className="text-slate-600 dark:text-slate-400 font-bold block mb-1.5">اختر طريقة الدفع:</label>

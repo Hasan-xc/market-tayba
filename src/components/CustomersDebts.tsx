@@ -31,6 +31,7 @@ import { dbService } from '../services/db';
 import { SupabaseService } from '../services/supabase';
 import { normalizeArabicText, normalizeDigits } from '../utils/search';
 import { SoundService } from '../utils/audio';
+import { roundMoney } from '../utils/money';
 
 interface Props {
   settings: StoreSettings;
@@ -59,7 +60,7 @@ export const CustomersDebts = ({ settings, onDataChange, showToast }: Props) => 
 
   // إحصائيات الديون العامة
   const totalOutstandingDebt = useMemo(() => {
-    return customers.reduce((sum, c) => sum + (c.currentDebt || 0), 0);
+    return roundMoney(customers.reduce((sum, c) => sum + (c.currentDebt || 0), 0));
   }, [customers]);
 
   const totalDebtorsCount = useMemo(() => {
@@ -107,7 +108,7 @@ export const CustomersDebts = ({ settings, onDataChange, showToast }: Props) => 
     }
 
     try {
-      const initDebt = Math.max(0, parseFloat(initialDebt) || 0);
+      const initDebt = roundMoney(Math.max(0, parseFloat(initialDebt) || 0));
       const saved = dbService.saveCustomer({
         id: editingCustomer ? editingCustomer.id : undefined,
         name: cleanName,
@@ -174,7 +175,7 @@ export const CustomersDebts = ({ settings, onDataChange, showToast }: Props) => 
       return;
     }
 
-    const amount = isFullBalance ? currentDebt : Math.max(0, parseFloat(paymentAmount) || 0);
+    const amount = isFullBalance ? currentDebt : roundMoney(Math.max(0, parseFloat(paymentAmount) || 0));
 
     if (amount <= 0) {
       showToast('يرجى إدخال مبلغ سداد صحيح', 'warn');

@@ -15,6 +15,7 @@ import {
   Branch,
   StockTransfer,
 } from '../types';
+import { roundMoney } from '../utils/money';
 import {
   hashPin,
   hashPassword,
@@ -111,7 +112,7 @@ class DbSalesService extends DbCustomersService {
       const custIdx = this.inMemoryCustomers.findIndex((c) => c.id === sale.customerId);
       if (custIdx !== -1) {
         const cust = this.inMemoryCustomers[custIdx];
-        const newBalance = cust.currentDebt + sale.netTotal;
+        const newBalance = roundMoney(cust.currentDebt + sale.netTotal);
         const updatedCust: Customer = {
           ...cust,
           currentDebt: newBalance,
@@ -442,7 +443,7 @@ class DbSalesService extends DbCustomersService {
       const custIdx = this.inMemoryCustomers.findIndex((c) => c.id === sale.customerId);
       if (custIdx !== -1) {
         const cust = this.inMemoryCustomers[custIdx];
-        const newBalance = Math.max(0, cust.currentDebt - sale.netTotal);
+        const newBalance = roundMoney(Math.max(0, cust.currentDebt - sale.netTotal));
         this.inMemoryCustomers[custIdx] = {
           ...cust,
           currentDebt: newBalance,

@@ -228,9 +228,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_app_users_username ON public.app_users (LOW
 CREATE UNIQUE INDEX IF NOT EXISTS uq_app_users_auth_uid ON public.app_users (auth_uid) WHERE auth_uid IS NOT NULL;
 
 -- دوال مساعدة: تفحص دور وفرع المستخدم الحالي عبر auth.uid()
+-- SECURITY DEFINER إلزامي: سياسات app_users نفسها تستدعي is_admin()، ولو بقيت
+-- INVOKER لأدى ذلك إلى استدعاء متكرر لا نهائي ("infinite recursion detected in
+-- policy for relation app_users"). DEFINER يقرأ app_users بلا إعادة تفعيل RLS
+-- (المالك لا يخضع لـ RLS ما لم تُفعَّل FORCE)، مع تثبيت search_path للأمان.
 CREATE OR REPLACE FUNCTION public.is_admin()
 RETURNS BOOLEAN
-LANGUAGE sql STABLE SECURITY INVOKER
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public
 AS $$
   SELECT EXISTS (
     SELECT 1 FROM public.app_users u
@@ -241,14 +246,16 @@ $$;
 
 CREATE OR REPLACE FUNCTION public.current_username()
 RETURNS TEXT
-LANGUAGE sql STABLE SECURITY INVOKER
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public
 AS $$
   SELECT NULLIF(LOWER(SPLIT_PART(COALESCE(auth.jwt() ->> 'email', ''), '@', 1)), '')
 $$;
 
 CREATE OR REPLACE FUNCTION public.current_user_branch()
 RETURNS TEXT
-LANGUAGE sql STABLE SECURITY INVOKER
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public
 AS $$
   SELECT (SELECT u.branch_id FROM public.app_users u WHERE u.auth_uid = auth.uid() LIMIT 1)
 $$;

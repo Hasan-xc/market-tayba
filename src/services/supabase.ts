@@ -1,6 +1,7 @@
 import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
 import { Product, SaleTransaction, ReturnRecord, StoreSettings, Customer, DebtTransaction, StockAuditLog, Supplier, StockTransfer } from '../types';
 import { dbService, SEED_PRODUCTS, DEFAULT_SETTINGS } from './db';
+import { roundMoney } from '../utils/money';
 
 export const DEFAULT_SUPABASE_URL = 'https://qvfunbtrgdhtqlmjwdzc.supabase.co';
 export const DEFAULT_SUPABASE_ANON_KEY =
@@ -1059,17 +1060,22 @@ export class SupabaseService {
       const primaryItem = sale.items?.[0];
 
       // 1. تجهيز حمولة الفاتورة الشاملة (مفتاح Idempotency = معرف الفاتورة نفسه)
+      // المبالغ المالية تُقرَّب لأقرب قرش/فلس قبل الإرسال حتى لا تُخزَّن بقايا فاصلة عائمة
       const invoicePayload: Record<string, any> = {
         id: saleId,
         invoice_number: invoiceNumber,
-        items: sale.items || [],
-        subtotal: Number(sale.subtotal) || 0,
-        discount_total: Number(sale.discountTotal) || 0,
-        net_total: Number(sale.netTotal) || 0,
-        total_profit: Number(sale.totalProfit) || 0,
+        items: (sale.items || []).map((it) => ({
+          ...it,
+          total: roundMoney(Number(it.total) || 0),
+          profit: roundMoney(Number(it.profit) || 0),
+        })),
+        subtotal: roundMoney(Number(sale.subtotal) || 0),
+        discount_total: roundMoney(Number(sale.discountTotal) || 0),
+        net_total: roundMoney(Number(sale.netTotal) || 0),
+        total_profit: roundMoney(Number(sale.totalProfit) || 0),
         payment_method: sale.paymentMethod || 'cash',
-        cash_tendered: Number(sale.cashTendered) || Number(sale.netTotal) || 0,
-        change_due: Number(sale.changeDue) || 0,
+        cash_tendered: roundMoney(Number(sale.cashTendered) || Number(sale.netTotal) || 0),
+        change_due: roundMoney(Number(sale.changeDue) || 0),
         cashier_name: sale.cashierName || 'الكاشير',
         customer_id: sale.customerId || null,
         customer_name: sale.customerName || null,
@@ -1078,8 +1084,8 @@ export class SupabaseService {
         quantity_sold: sale.items?.reduce((sum, it) => sum + (Number(it.quantity) || 1), 0) || 1,
         purchase_price: primaryItem?.purchasePrice || 0,
         sale_price: primaryItem?.unitPrice || 0,
-        total_amount: Number(sale.netTotal) || 0,
-        profit: Number(sale.totalProfit) || 0,
+        total_amount: roundMoney(Number(sale.netTotal) || 0),
+        profit: roundMoney(Number(sale.totalProfit) || 0),
         sold_at: sale.createdAt || new Date().toISOString(),
         created_at: sale.createdAt || new Date().toISOString(),
         branch_id: sale.branchId || 'branch-main',
@@ -2052,17 +2058,18 @@ create table if not exists public.app_users (
 create unique index if not exists uq_app_users_username on public.app_users (lower(username));
 create unique index if not exists uq_app_users_auth_uid on public.app_users (auth_uid) where auth_uid is not null;
 
--- دوال مساعدة للدور والفرع
+-- دوال مساعدة للدور والفرع (SECURITY DEFINER: سياسات app_users تستدعي is_admin()
+-- ولو بقيت invoker لحدث استدعاء متكرر لا نهائي — إلزامي مع تثبيت search_path)
 create or replace function public.is_admin()
-returns boolean language sql stable security invoker as $$
+returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.app_users u where u.auth_uid = auth.uid() and lower(coalesce(u.role, '')) = 'admin');
 $$;
 create or replace function public.current_username()
-returns text language sql stable security invoker as $$
+returns text language sql stable security definer set search_path = public as $$
   select nullif(lower(split_part(coalesce(auth.jwt() ->> 'email', ''), '@', 1)), '');
 $$;
 create or replace function public.current_user_branch()
-returns text language sql stable security invoker as $$
+returns text language sql stable security definer set search_path = public as $$
   select (select u.branch_id from public.app_users u where u.auth_uid = auth.uid() limit 1);
 $$;
 

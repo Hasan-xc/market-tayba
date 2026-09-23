@@ -28,6 +28,7 @@ import { PosCheckoutModal } from './PosCheckoutModal';
 import { PosParkedCartsModal } from './PosParkedCartsModal';
 import { matchProductSearch, normalizeArabicText } from '../utils/search';
 import { SoundService } from '../utils/audio';
+import { roundMoney } from '../utils/money';
 
 interface Props {
   settings: StoreSettings;
@@ -91,12 +92,12 @@ export const POS = ({ settings, products, currentUser, onDataChange, showToast }
     return branchProducts.filter((p) => dbService.getProductStock(p, activeBranchId) > 0).slice(0, 10);
   }, [branchProducts, activeBranchId]);
 
-  // حساب الإجماليات
-  const cartSubtotal = cart.reduce((sum, item) => sum + item.total, 0);
-  const netTotal = Math.max(0, cartSubtotal - globalDiscount);
+  // حساب الإجماليات (تقريب مالي قبل التخزين/المقارنة لمنع أخطاء الفاصلة العائمة)
+  const cartSubtotal = roundMoney(cart.reduce((sum, item) => sum + item.total, 0));
+  const netTotal = roundMoney(Math.max(0, cartSubtotal - globalDiscount));
   const totalItemsCount = cart.reduce((sum, item) => sum + item.quantity, 0);
   const numericCashTendered = parseFloat(cashTendered) || 0;
-  const changeDue = Math.max(0, numericCashTendered - netTotal);
+  const changeDue = roundMoney(Math.max(0, numericCashTendered - netTotal));
 
   // العملاء المفلترون للاختيار السريع
   const filteredCustomers = useMemo(() => {
@@ -116,7 +117,7 @@ export const POS = ({ settings, products, currentUser, onDataChange, showToast }
   const applyPercentDiscount = (percent: number) => {
     setSelectedDiscountPercent(percent);
     const discountVal = (cartSubtotal * percent) / 100;
-    setGlobalDiscount(Math.round(discountVal * 100) / 100);
+    setGlobalDiscount(roundMoney(discountVal));
   };
 
   // إلغاء الخصم
@@ -135,7 +136,7 @@ export const POS = ({ settings, products, currentUser, onDataChange, showToast }
     const val = parseFloat(valStr);
     if (isNaN(val) || val < 0) return;
     const diff = Math.max(0, cartSubtotal - val);
-    setGlobalDiscount(Math.round(diff * 100) / 100);
+    setGlobalDiscount(roundMoney(diff));
   };
 
   // إضافة منتج للسلة بالاعتماد على مخزون الفرع الحالي
@@ -421,12 +422,12 @@ export const POS = ({ settings, products, currentUser, onDataChange, showToast }
           purchasePrice: item.product.purchasePrice,
           unitPrice: item.unitPrice,
           discount: item.discount,
-          total: item.total,
-          profit: itemProfit,
+          total: roundMoney(item.total),
+          profit: roundMoney(itemProfit),
         };
       });
 
-      const totalProfit = saleItems.reduce((sum, item) => sum + item.profit, 0) - globalDiscount;
+      const totalProfit = roundMoney(saleItems.reduce((sum, item) => sum + item.profit, 0) - globalDiscount);
 
       const cust = selectedCustomer;
 

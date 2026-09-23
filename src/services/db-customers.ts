@@ -15,6 +15,7 @@ import {
   Branch,
   StockTransfer,
 } from '../types';
+import { roundMoney } from '../utils/money';
 import {
   hashPin,
   hashPassword,
@@ -224,7 +225,7 @@ class DbCustomersService extends DbInventoryService {
     }
 
     const currentCust = this.inMemoryCustomers[custIdx];
-    const newBalance = Math.max(0, currentCust.currentDebt - paymentAmount);
+    const newBalance = roundMoney(Math.max(0, currentCust.currentDebt - paymentAmount));
     
     // تحديث رصيد العميل
     const updatedCust: Customer = {

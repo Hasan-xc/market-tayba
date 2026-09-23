@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { X, Scale, Coins, Check, AlertCircle } from 'lucide-react';
 import { Product } from '../types';
 import { dbService } from '../services/db';
+import { roundMoney } from '../utils/money';
 
 interface Props {
   isOpen: boolean;
@@ -50,7 +51,7 @@ export const WeightEntryModal: React.FC<Props> = ({
   // الوزن المحسوب من المبلغ يُقرَّب لثلاث خانات عشرية لتجنب بقايا الفاصلة العائمة
   const computedWeight = price > 0 ? Math.round((amountNum / price) * 1000) / 1000 : 0;
   const effectiveWeight = mode === 'weight' ? weightNum : computedWeight;
-  const total = Math.round(effectiveWeight * price * 100) / 100;
+  const total = roundMoney(effectiveWeight * price);
 
   if (!isOpen || !product) return null;
 

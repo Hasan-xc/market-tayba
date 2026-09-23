@@ -12,6 +12,7 @@ import {
   Tag,
 } from 'lucide-react';
 import { CartItem, StoreSettings, Customer } from '../types';
+import { roundMoney } from '../utils/money';
 
 interface PosCheckoutModalProps {
   isOpen: boolean;
@@ -380,7 +381,7 @@ export const PosCheckoutModal = ({
                   onChange={(e) => {
                     setSelectedDiscountPercent(null);
                     const val = parseFloat(e.target.value) || 0;
-                    setGlobalDiscount(Math.min(cartSubtotal, Math.max(0, val)));
+                    setGlobalDiscount(roundMoney(Math.min(cartSubtotal, Math.max(0, val))));
                   }}
                   className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white py-1 pr-2.5 pl-10 text-[11px] font-mono font-bold focus:border-emerald-600 focus:outline-none"
                 />

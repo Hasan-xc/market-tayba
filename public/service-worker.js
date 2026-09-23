@@ -5,7 +5,7 @@
   وتتزامن مع Supabase — الـ SW لا يخزن أي بيانات عمل، فقط ملفات الواجهة.
 */
 
-const CACHE_NAME = 'market-tayba-cache-v1';
+const CACHE_NAME = 'market-tayba-cache-v2';
 const APP_SHELL = [
   './',
   './index.html',
